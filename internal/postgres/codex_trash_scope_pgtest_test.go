@@ -19,6 +19,101 @@ const (
 	codexTrashReturning = codexTrashThread + "_44444444-4444-4444-8444-444444444444"
 )
 
+func TestPreSplitPGTrashKeepsPagesHidden(t *testing.T) {
+	for _, tc := range []struct {
+		name, prefix, agent string
+	}{
+		{"restore_page", "codex:", "codex"},
+		{"restore_thread", "host-a~traex:", "traex"},
+		{"purge_thread", "augure-code:", "augure-code"},
+		{"new_per_file", "codex:", "codex"},
+		{"other_archive", "codex:", "codex"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			const schema = "agentsview_presplit_pgtrash_test"
+			pgURL := testPGURL(t)
+			cleanNamedPGSchema(t, pgURL, schema)
+			t.Cleanup(func() { cleanNamedPGSchema(t, pgURL, schema) })
+			pg, err := Open(pgURL, schema, true)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, pg.Close()) })
+			require.NoError(t, EnsureSchema(ctx, pg, schema))
+			thread := tc.prefix + "11111111-1111-4111-8111-111111111111"
+			page := thread + "_22222222-2222-4222-8222-222222222222"
+			returning := thread + "_33333333-3333-4333-8333-333333333333"
+			local := testDB(t)
+			require.NoError(t, local.UpsertSession(ctx, db.Session{ID: thread, Agent: tc.agent, Project: "sample", Machine: "machine"}))
+			syncer := &Sync{pg: pg, local: local, machine: "machine", schema: schema, schemaDone: true}
+			_, err = syncer.Push(ctx, true, nil)
+			require.NoError(t, err)
+			store := &Store{pg: pg}
+			require.NoError(t, store.SoftDeleteSession(ctx, thread))
+			if tc.name != "new_per_file" {
+				// Recreate the pre-split schema after an actual PostgreSQL-only
+				// trash action. The source archive remains active throughout.
+				_, err = pg.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN trash_includes_codex_pages, DROP COLUMN source_trash_includes_codex_pages;
+					ALTER TABLE excluded_sessions DROP COLUMN include_codex_pages`)
+				require.NoError(t, err)
+				_, err = pg.ExecContext(ctx, `DELETE FROM sync_metadata WHERE key=$1`, codexThreadScopeMetadataKey)
+				require.NoError(t, err)
+			}
+			require.NoError(t, EnsureSchema(ctx, pg, schema))
+			if tc.name == "other_archive" {
+				local = testDB(t)
+				syncer.local = local
+			}
+			child := db.Session{ID: page, Agent: tc.agent, Project: "sample", Machine: "machine", ParentSessionID: new(thread), RelationshipType: "continuation"}
+			require.NoError(t, local.UpsertSession(ctx, child))
+			_, err = syncer.Push(ctx, true, nil)
+			require.NoError(t, err)
+			got, err := store.GetSessionFull(ctx, page)
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			if tc.name == "new_per_file" || tc.name == "other_archive" {
+				assert.Nil(t, got.DeletedAt)
+				return
+			}
+			assert.NotNil(t, got.DeletedAt, "the old PostgreSQL trash action must cover its split page")
+			child.Project = "updated-project"
+			require.NoError(t, local.UpsertSession(ctx, child))
+			_, err = syncer.Push(ctx, true, nil)
+			require.NoError(t, err)
+			var sourceDeleted sql.NullTime
+			require.NoError(t, pg.QueryRowContext(ctx, `SELECT source_deleted_at FROM sessions WHERE id=$1`, page).Scan(&sourceDeleted))
+			assert.False(t, sourceDeleted.Valid, "inherited PostgreSQL trash is not a source deletion")
+			if tc.name == "purge_thread" {
+				n, err := store.DeleteSessionIfTrashed(ctx, thread)
+				require.NoError(t, err)
+				assert.EqualValues(t, 2, n)
+			} else {
+				restoredID := page
+				if tc.name == "restore_thread" {
+					restoredID = thread
+				}
+				n, err := store.RestoreSession(ctx, restoredID)
+				require.NoError(t, err)
+				require.EqualValues(t, 1, n)
+			}
+			require.NoError(t, EnsureSchema(ctx, pg, schema))
+			require.NoError(t, local.UpsertSession(ctx, db.Session{ID: returning, Agent: tc.agent, Project: "sample", Machine: "machine"}))
+			_, err = syncer.Push(ctx, true, nil)
+			require.NoError(t, err)
+			got, err = store.GetSessionFull(ctx, returning)
+			require.NoError(t, err)
+			if tc.name == "purge_thread" {
+				assert.Nil(t, got, "purged thread scope also excludes returning pages")
+			} else {
+				require.NotNil(t, got)
+				assert.Nil(t, got.DeletedAt, "restoring a member ends inherited thread trash")
+				trash, err := store.ListTrashedSessions(ctx)
+				require.NoError(t, err)
+				assert.Len(t, trash, 1, "restore leaves the other materialized member in trash")
+			}
+		})
+	}
+}
+
 // Exercise the real archive upgrade and push boundary, including pages whose
 // messages were materialized before the legacy deletion scope was restored.
 func newCodexTrashMirror(t *testing.T) (*db.DB, *Sync, *Store) {

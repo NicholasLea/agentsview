@@ -103,10 +103,12 @@ per-file.
 PostgreSQL mirrors this scope and keeps a separate source baseline for it, so
 restoring a page in PostgreSQL survives later pushes even when its thread row
 stays trashed. Restoring a page locally also advances the thread row's sync
-marker. PostgreSQL upgrades existing permanent Codex thread exclusions to
-thread-wide scope once; later deletions remain per-file. PostgreSQL purge
-retains thread-wide exclusions for later pushes; the hosted legacy routes use
-the same behavior without removing raw projections.
+marker. PostgreSQL upgrades existing Codex thread trash and permanent exclusions
+to thread-wide scope once; later deletions remain per-file. Pages pushed from
+the same source inherit a trashed PostgreSQL thread's scope until a member is
+restored or purged. PostgreSQL purge retains thread-wide exclusions for later
+pushes; the hosted legacy routes use the same behavior without removing raw
+projections.
 
 ### Codex incremental import state
 

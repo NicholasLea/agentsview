@@ -2203,6 +2203,15 @@ func writePGSession(ctx context.Context, tx *sql.Tx, sess db.Session, markerID s
 		return fmt.Errorf("encoding legacy marker machines: %w", err)
 	}
 	result, err := tx.ExecContext(ctx, `
+		WITH inherited_trash AS (
+			SELECT deleted_at FROM sessions
+			WHERE id = left($1, -37) AND left(right($1, 37), 1) = '_'
+			  AND agent = $5 AND provenance_kind = 'legacy'
+			  AND trash_includes_codex_pages AND deleted_at IS NOT NULL
+			  AND (owner_marker = $3 OR (owner_marker = '' AND (
+				machine = $2 OR machine IN ('', 'local')
+				OR machine IN (SELECT jsonb_array_elements_text($69::jsonb)))))
+		)
 		INSERT INTO sessions (
 			id, machine, owner_marker, project, agent,
 			first_message, display_name, source_display_name,
@@ -2239,7 +2248,8 @@ func writePGSession(ctx context.Context, tx *sql.Tx, sess db.Session, markerID s
 			)
 			SELECT
 				$1, $2, $3, $4, $5, $6, $7, $8,
-				$9, $10, $11, $12, $13, $14, $15,
+				$9, $10, $11, $12,
+				COALESCE($13, (SELECT deleted_at FROM inherited_trash)), $14, $15,
 				$16, $17, $18, $19,
 				$20, $21, $22, $23,
 				$24, $25, $26, $27, $28, $29, $30,
@@ -2299,7 +2309,7 @@ func writePGSession(ctx context.Context, tx *sql.Tx, sess db.Session, markerID s
 					sessions.source_deleted_at THEN sessions.deletion_cause
 				ELSE EXCLUDED.deletion_cause
 			END,
-			source_deleted_at = EXCLUDED.deleted_at,
+			source_deleted_at = EXCLUDED.source_deleted_at,
 			trash_includes_codex_pages = CASE
 				WHEN sessions.deleted_at IS DISTINCT FROM sessions.source_deleted_at
 					OR sessions.trash_includes_codex_pages IS DISTINCT FROM
@@ -2395,7 +2405,9 @@ func writePGSession(ctx context.Context, tx *sql.Tx, sess db.Session, markerID s
 			OR sessions.created_at IS DISTINCT FROM EXCLUDED.created_at
 			OR sessions.started_at IS DISTINCT FROM EXCLUDED.started_at
 			OR sessions.ended_at IS DISTINCT FROM EXCLUDED.ended_at
-			OR sessions.source_deleted_at IS DISTINCT FROM EXCLUDED.deleted_at
+			OR sessions.source_deleted_at IS DISTINCT FROM EXCLUDED.source_deleted_at
+			OR (sessions.deleted_at IS NOT DISTINCT FROM sessions.source_deleted_at
+				AND sessions.deleted_at IS DISTINCT FROM EXCLUDED.deleted_at)
 			OR sessions.source_trash_includes_codex_pages IS DISTINCT FROM EXCLUDED.trash_includes_codex_pages
 			OR sessions.deletion_cause IS DISTINCT FROM EXCLUDED.deletion_cause
 			OR sessions.message_count IS DISTINCT FROM EXCLUDED.message_count

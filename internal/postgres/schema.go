@@ -18,7 +18,7 @@ import (
 const (
 	tokenCoverageRepairMetadataKey        = "token_coverage_repair_v1"
 	sourceCurationBackfillMetadataKey     = "source_curation_baseline_backfill_v1"
-	codexExclusionScopeMetadataKey        = "codex_thread_exclusion_scope_v1"
+	codexThreadScopeMetadataKey           = "codex_thread_scope_v1"
 	projectIdentityRemoteScrubMetadataKey = "git_remote_credentials_scrub_v1"
 	tokenCoverageBackfillBatchSize        = 1000
 )
@@ -1269,7 +1269,7 @@ func backfillIsAutomatedPG(
 // compatible-schema fast path can run them without the index and
 // column DDL that can block concurrent pg serve reads (issue #887).
 func runSchemaDataRepairsPG(ctx context.Context, db *sql.DB) error {
-	if err := backfillCodexExclusionScopePG(ctx, db); err != nil {
+	if err := backfillCodexThreadScopePG(ctx, db); err != nil {
 		return err
 	}
 	if err := backfillIsAutomatedPG(ctx, db); err != nil {
@@ -1297,20 +1297,27 @@ func runSchemaDataRepairsPG(ctx context.Context, db *sql.DB) error {
 	return markTokenCoverageRepairDone(ctx, db)
 }
 
-// Backfill only exclusions present when per-file Codex identities are enabled.
-// The marker and update share one statement so retries cannot widen subsequent
-// per-file deletions. Hosted raw curation uses separate tables and identities.
-func backfillCodexExclusionScopePG(ctx context.Context, pg pgSessionExecer) error {
+// Backfill only thread deletion decisions present before per-file identities.
+// The marker and updates share one statement so retries cannot widen subsequent
+// per-file actions. Hosted raw curation uses separate tables and identities.
+func backfillCodexThreadScopePG(ctx context.Context, pg pgSessionExecer) error {
 	_, err := pg.ExecContext(ctx, `
 		WITH migration AS (
 			INSERT INTO sync_metadata (key, value) VALUES ($1, '1')
 			ON CONFLICT (key) DO NOTHING RETURNING key
+		), exclusions AS (
+			UPDATE excluded_sessions SET include_codex_pages = TRUE
+			WHERE id ~ $2 AND EXISTS (SELECT 1 FROM migration)
 		)
-		UPDATE excluded_sessions SET include_codex_pages = TRUE
-		WHERE id ~ '(^|~)(codex|traex|augure-code):[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-		  AND EXISTS (SELECT 1 FROM migration)`, codexExclusionScopeMetadataKey)
+		UPDATE sessions SET trash_includes_codex_pages = TRUE,
+			source_trash_includes_codex_pages = (source_deleted_at IS NOT NULL)
+		WHERE id ~ $2 AND agent IN ('codex', 'traex', 'augure-code')
+		  AND provenance_kind = 'legacy' AND deleted_at IS NOT NULL
+		  AND deletion_cause IS DISTINCT FROM 'source_missing'
+		  AND EXISTS (SELECT 1 FROM migration)`, codexThreadScopeMetadataKey,
+		`(^|~)(codex|traex|augure-code):[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	if err != nil {
-		return fmt.Errorf("preserving legacy Codex exclusions: %w", err)
+		return fmt.Errorf("preserving legacy Codex deletion scope: %w", err)
 	}
 	return nil
 }
@@ -1709,7 +1716,7 @@ func ensureColumns(
 		}
 	}
 	if existing["excluded_sessions"]["include_codex_pages"] {
-		if err := backfillCodexExclusionScopePG(ctx, db); err != nil {
+		if err := backfillCodexThreadScopePG(ctx, db); err != nil {
 			return nil, err
 		}
 	}
