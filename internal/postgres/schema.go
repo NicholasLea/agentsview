@@ -18,6 +18,7 @@ import (
 const (
 	tokenCoverageRepairMetadataKey        = "token_coverage_repair_v1"
 	sourceCurationBackfillMetadataKey     = "source_curation_baseline_backfill_v1"
+	codexExclusionScopeMetadataKey        = "codex_thread_exclusion_scope_v1"
 	projectIdentityRemoteScrubMetadataKey = "git_remote_credentials_scrub_v1"
 	tokenCoverageBackfillBatchSize        = 1000
 )
@@ -1268,6 +1269,9 @@ func backfillIsAutomatedPG(
 // compatible-schema fast path can run them without the index and
 // column DDL that can block concurrent pg serve reads (issue #887).
 func runSchemaDataRepairsPG(ctx context.Context, db *sql.DB) error {
+	if err := backfillCodexExclusionScopePG(ctx, db); err != nil {
+		return err
+	}
 	if err := backfillIsAutomatedPG(ctx, db); err != nil {
 		return err
 	}
@@ -1291,6 +1295,24 @@ func runSchemaDataRepairsPG(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	return markTokenCoverageRepairDone(ctx, db)
+}
+
+// Backfill only exclusions present when per-file Codex identities are enabled.
+// The marker and update share one statement so retries cannot widen subsequent
+// per-file deletions. Hosted raw curation uses separate tables and identities.
+func backfillCodexExclusionScopePG(ctx context.Context, pg pgSessionExecer) error {
+	_, err := pg.ExecContext(ctx, `
+		WITH migration AS (
+			INSERT INTO sync_metadata (key, value) VALUES ($1, '1')
+			ON CONFLICT (key) DO NOTHING RETURNING key
+		)
+		UPDATE excluded_sessions SET include_codex_pages = TRUE
+		WHERE id ~ '(^|~)(codex|traex|augure-code):[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+		  AND EXISTS (SELECT 1 FROM migration)`, codexExclusionScopeMetadataKey)
+	if err != nil {
+		return fmt.Errorf("preserving legacy Codex exclusions: %w", err)
+	}
+	return nil
 }
 
 // repairLegacySourceMissingDeletionPG restores mirror rows written while
@@ -1684,6 +1706,11 @@ func ensureColumns(
 		for _, migration := range adds.migrations {
 			existing[adds.table][migration.column] = true
 			added = append(added, migration.column)
+		}
+	}
+	if existing["excluded_sessions"]["include_codex_pages"] {
+		if err := backfillCodexExclusionScopePG(ctx, db); err != nil {
+			return nil, err
 		}
 	}
 	return added, nil
