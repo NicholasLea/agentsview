@@ -691,10 +691,10 @@ func TestCodexRevertPageRebuildPreservesDeletionState(t *testing.T) {
 				if tc.version < 127 {
 					assert.Nil(t, session, "an upgrade must keep every page hidden")
 					if tc.pagePath && page == 2 {
-						// This file is already retained by the copied trash row,
-						// so sync leaves its content under the old thread ID.
+						// The saved transcript belongs to this page, while the
+						// thread row retains the inherited trash scope.
 						assert.True(t, reopened.IsSessionTrashed(t.Context(), threadID))
-						assert.Equal(t, []string{"Hidden thread"}, messageContents(t, reopened, threadID))
+						assert.Equal(t, []string{"Hidden thread"}, messageContents(t, reopened, id))
 						continue
 					}
 					if tc.trash {

@@ -297,6 +297,12 @@ func (d *DB) CopyTrashedDataFrom(sourcePath string) ([]string, error) {
 		)
 	}()
 
+	sourceVersion, err := prepareCodexSessionIDMap(ctx, conn, false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _, _ = conn.ExecContext(ctx, dropCodexSessionIDMapSQL) }()
+
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin trashed copy tx: %w", err)
@@ -327,6 +333,12 @@ func (d *DB) CopyTrashedDataFrom(sourcePath string) ([]string, error) {
 			"DROP TABLE IF EXISTS _trashed_ids",
 		)
 	}()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE _trashed_ids SET id = mapped.target_id
+		FROM _codex_session_ids mapped
+		WHERE _trashed_ids.source_id = mapped.source_id AND mapped.is_page = 1`); err != nil {
+		return nil, fmt.Errorf("mapping trashed Codex pages: %w", err)
+	}
 
 	if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX _trashed_source_ids ON _trashed_ids(source_id)`); err != nil {
 		return nil, fmt.Errorf("indexing trashed source IDs: %w", err)
@@ -343,7 +355,6 @@ func (d *DB) CopyTrashedDataFrom(sourcePath string) ([]string, error) {
 	if err := copySessionDataForIDs(ctx, tx, "_trashed_ids"); err != nil {
 		return nil, fmt.Errorf("copying trashed data: %w", err)
 	}
-	sourceVersion := copiedSourceDataVersion(ctx, tx)
 	if err := removeGeneratedIdentitySnapshotsWithoutSource(
 		ctx, tx, "_trashed_ids", sourceVersion,
 	); err != nil {
@@ -358,6 +369,29 @@ func (d *DB) CopyTrashedDataFrom(sourcePath string) ([]string, error) {
 		ctx, tx, "_trashed_ids", d.ArchiveContent(), sourceVersion,
 	); err != nil {
 		return nil, fmt.Errorf("projecting trashed data: %w", err)
+	}
+	// Keep the archived transcript under its page ID before the upgrade loses
+	// the filename mapping. Retain an empty thread row for legacy trash scope;
+	// restoring it must never let the original rollout replace the saved page.
+	if oldDBHasTable(ctx, tx, "starred_sessions") {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO main.starred_sessions (session_id, created_at)
+			SELECT copied.id, old_star.created_at
+			FROM old_db.starred_sessions old_star
+			JOIN _trashed_ids copied ON copied.source_id = old_star.session_id
+			WHERE copied.id != copied.source_id`); err != nil {
+			return nil, fmt.Errorf("copying trashed Codex page stars: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO main.sessions
+			(id, project, machine, agent, started_at, ended_at, deleted_at, created_at)
+		SELECT old_s.id, old_s.project, old_s.machine, old_s.agent,
+			old_s.started_at, old_s.ended_at, old_s.deleted_at, old_s.created_at
+		FROM old_db.sessions old_s
+		JOIN _trashed_ids copied ON copied.source_id = old_s.id
+		WHERE copied.id != copied.source_id`); err != nil {
+		return nil, fmt.Errorf("retaining Codex trash thread rows: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -2338,20 +2372,6 @@ const (
 // rather than a worktree mapping target. Older snapshots must not cross a
 // full-resync copy.
 const projectIdentitySourceSnapshotDataVersion = 77
-
-// copiedSourceDataVersion reads the attached old_db's data version.
-// Read errors are logged and returned as 0 so the copy conservatively
-// re-sanitizes everything.
-func copiedSourceDataVersion(ctx context.Context, tx *sql.Tx) int {
-	var version int
-	if err := tx.QueryRowContext(
-		ctx, "PRAGMA old_db.user_version",
-	).Scan(&version); err != nil {
-		log.Printf("resync: reading source data version: %v", err)
-		return 0
-	}
-	return version
-}
 
 func sanitizeCopiedSessionContent(
 	ctx context.Context,

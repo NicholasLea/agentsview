@@ -605,6 +605,9 @@ fixtures retain this field; missing identities remain source-local.
   their page without overwriting the original thread's identity. Archived
   pages whose files are absent keep their messages, tool results, usage, and
   export identities under the page ID, even if the original file is reparsed.
+  Trashed archived pages move the same way, retaining their saved names,
+  stars, and pins; an empty thread row holds the inherited trash scope.
+  Reverified upgrade, restore, and rebuild with an absent page on 2026-10-04.
   Their base cannot be recovered from disk, so they link to the thread. Recall
   entries, evidence, extraction progress, and conversation export identities
   and session state move to the page even when its file was reparsed. The
@@ -623,6 +626,7 @@ fixtures retain this field; missing identities remain source-local.
   `TestCodexPageUpgradeRetainsReparsedConversationIDs`,
   `TestCodexPageUpgradeRetainsColdConversationState`,
   `TestLegacyCodexTrashScopeSurvivesReturningPage`,
+  `TestLegacyCodexTrashRestorePreservesArchivedPage`,
   `TestLiveActivityLookupFollowsNewestCodexRevertPage`,
   `TestCodexForkOfRevertedThreadDropsReplayedPageTurns`,
   `TestCodexForkWithOnlyParentPageNeedsRetry`,

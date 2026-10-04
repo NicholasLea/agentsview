@@ -93,9 +93,12 @@ Legacy trash keeps the same thread-wide scope in
 `sessions.trash_includes_codex_pages`. The retained thread row blocks imports of
 absent pages even when they return at a different path. Restoring the thread or
 one of its pages ends that inherited scope; other existing trash rows remain
-trashed. Permanently deleting the thread transfers the scope to
-`excluded_sessions` and removes its covered pages in the same transaction. New
-trash actions remain per-file.
+trashed. An archived page stored under the old thread ID moves to its page ID
+even while trashed; an empty thread row retains the scope. Restoring and
+reparsing the original thread therefore cannot replace that saved page.
+Permanently deleting the thread transfers the scope to `excluded_sessions` and
+removes its covered pages in the same transaction. New trash actions remain
+per-file.
 
 PostgreSQL mirrors this scope and keeps a separate source baseline for it, so
 restoring a page in PostgreSQL survives later pushes even when its thread row
