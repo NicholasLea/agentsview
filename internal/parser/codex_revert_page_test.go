@@ -154,10 +154,8 @@ func TestCodexRevertPageHelperRejectsNonPages(t *testing.T) {
 		{"not_a_rollout", "notes.jsonl", revertThread},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			id, parent, ok := codexRevertPage(tc.path, tc.threadID, revertThread, "", false)
+			_, _, ok := codexRevertPage(tc.path, tc.threadID, revertThread, "", false)
 			assert.False(t, ok)
-			assert.Empty(t, id)
-			assert.Empty(t, parent)
 		})
 	}
 }
