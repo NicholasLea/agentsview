@@ -858,7 +858,7 @@ func testProviderParserHostedCodexForkLineage(
 	)), 0o600))
 	// An overlapping flat root must not capture the same page twice.
 	roots = append(roots, filepath.Dir(pagePath))
-	require.NoError(t, os.WriteFile(childPath, []byte(testjsonl.JoinJSONL(
+	childLines := []string{
 		testjsonl.CodexForkedSessionMetaJSON(
 			childID, parentID, "/work/project", "codex_cli_rs", "2026-09-09T10:00:00Z",
 		),
@@ -869,11 +869,23 @@ func testProviderParserHostedCodexForkLineage(
 		testjsonl.CodexMsgJSON("user", "replayed page task", "2026-09-09T10:00:05Z"),
 		testjsonl.CodexMsgJSON("assistant", "replayed page answer", "2026-09-09T10:00:06Z"),
 		testjsonl.CodexTokenCountJSON("2026-09-09T10:00:07Z", 50000, 9000, 0),
+	}
+	if shadowParent {
+		// The child also replays the shadow parent copy's turn, so dropping
+		// either copy from capture leaks replayed messages into the child.
+		childLines = append(childLines,
+			testjsonl.CodexTurnContextWithIDJSON("gpt-5.4", "other-parent-turn", "2026-09-09T10:00:08Z"),
+			testjsonl.CodexMsgJSON("user", "replayed other parent task", "2026-09-09T10:00:09Z"),
+			testjsonl.CodexMsgJSON("assistant", "replayed other parent answer", "2026-09-09T10:00:10Z"),
+		)
+	}
+	childLines = append(childLines,
 		testjsonl.CodexTurnContextWithIDJSON("gpt-5.4", childTurnID, "2026-09-09T10:01:00Z"),
 		testjsonl.CodexMsgJSON("user", "child task", "2026-09-09T10:01:01Z"),
 		testjsonl.CodexMsgJSON("assistant", "child answer", "2026-09-09T10:01:02Z"),
 		testjsonl.CodexTokenCountJSON("2026-09-09T10:01:03Z", 10000, 500, 0),
-	)), 0o600))
+	)
+	require.NoError(t, os.WriteFile(childPath, []byte(testjsonl.JoinJSONL(childLines...)), 0o600))
 	if shadowParent {
 		// The same parent filename in a later configured root carries different
 		// turns. Capture must retain both copies, just like local parsing.
