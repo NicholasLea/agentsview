@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -45,18 +46,17 @@ func (s *Sync) migrateCodexPagePins(
 	if err != nil {
 		return fmt.Errorf("finding legacy Codex page pins: %w", err)
 	}
+	defer rows.Close()
 	type legacyPage struct{ id, path, agent, machine, owner, archive string }
 	var pages []legacyPage
 	for rows.Next() {
 		var page legacyPage
 		if err := rows.Scan(&page.id, &page.path, &page.agent, &page.machine, &page.owner, &page.archive); err != nil {
-			rows.Close()
 			return fmt.Errorf("reading legacy Codex page pins: %w", err)
 		}
 		pages = append(pages, page)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
 		return fmt.Errorf("reading legacy Codex page pins: %w", err)
 	}
 	if err := rows.Close(); err != nil {
@@ -70,7 +70,7 @@ func (s *Sync) migrateCodexPagePins(
 			continue
 		}
 		if old.archive != "" && old.archive != s.archiveID {
-			return fmt.Errorf("cannot move Codex page pins from another source archive")
+			return errors.New("cannot move Codex page pins from another source archive")
 		}
 		prefixEnd := strings.LastIndex(old.id, ":") + 1
 		key := parser.CodexSessionUUIDFromFilename(old.path[strings.LastIndexAny(old.path, `/\`)+1:])
