@@ -1663,7 +1663,9 @@ func (d *DB) CopySessionMetadataFrom(
 
 	// Session assignments are user-owned metadata. Restore them only for
 	// sessions that survived the rebuild, then reapply the effective project
-	// selected by the user instead of the parser-derived label.
+	// selected by the user instead of the parser-derived label. A legacy page
+	// inherits the assignment when no original rollout survives; an empty
+	// trash-scope thread row does not count as an original rollout.
 	type copiedProjectChange struct {
 		sessionID       string
 		previousProject string
@@ -1672,22 +1674,25 @@ func (d *DB) CopySessionMetadataFrom(
 	}
 	var projectChanges []copiedProjectChange
 	if oldDBHasTable(ctx, tx, "session_project_assignments") {
-		originalProjectExpr := "project"
+		originalProjectExpr := "assignment.project"
 		if oldDBHasColumn(ctx, tx, "session_project_assignments", "original_project") {
-			originalProjectExpr = "original_project"
+			originalProjectExpr = "assignment.original_project"
 		} else if oldDBHasTable(ctx, tx, "session_project_identity_snapshots") {
 			originalProjectExpr = `COALESCE(NULLIF((
 				SELECT snapshot.project
 				FROM old_db.session_project_identity_snapshots snapshot
-				WHERE snapshot.session_id = session_project_assignments.session_id
-			), ''), project)`
+				WHERE snapshot.session_id = assignment.session_id
+			), ''), assignment.project)`
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO main.session_project_assignments
 				(session_id, project, original_project, created_at, updated_at)
-			SELECT session_id, project, `+originalProjectExpr+`, created_at, updated_at
-			FROM old_db.session_project_assignments
-			WHERE session_id IN (SELECT id FROM main.sessions)
+			SELECT COALESCE(mapped.target_id, assignment.session_id),
+				assignment.project, `+originalProjectExpr+`, assignment.created_at, assignment.updated_at
+			FROM old_db.session_project_assignments assignment
+			LEFT JOIN _codex_page_metadata mapped ON mapped.source_id = assignment.session_id
+				AND NOT EXISTS (SELECT 1 FROM main.sessions WHERE id = assignment.session_id AND file_path IS NOT NULL)
+			WHERE COALESCE(mapped.target_id, assignment.session_id) IN (SELECT id FROM main.sessions)
 			ON CONFLICT(session_id) DO UPDATE SET
 				project = excluded.project,
 				original_project = excluded.original_project,
@@ -1698,8 +1703,10 @@ func (d *DB) CopySessionMetadataFrom(
 		rows, err := tx.QueryContext(ctx, `
 			SELECT current.id, previous.project, current.project,
 				assignment.project
-			FROM main.sessions current
-			JOIN old_db.sessions previous ON previous.id = current.id
+			FROM old_db.sessions previous
+			LEFT JOIN _codex_page_metadata mapped ON mapped.source_id = previous.id
+				AND NOT EXISTS (SELECT 1 FROM main.sessions WHERE id = previous.id AND file_path IS NOT NULL)
+			JOIN main.sessions current ON current.id = COALESCE(mapped.target_id, previous.id)
 			LEFT JOIN main.session_project_assignments assignment
 				ON assignment.session_id = current.id
 			WHERE previous.project != current.project

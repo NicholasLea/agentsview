@@ -606,27 +606,31 @@ fixtures retain this field; missing identities remain source-local.
   preserving page curation; an empty thread row retains any inherited trash
   scope. Verified through a real archive upgrade, repeated pushes, and trash
   restore/purge on 2026-10-06. Saved names and stars follow the page when the
-  original thread row is gone. Saved parser-source project identities follow
-  their page without overwriting the original thread's identity. Archived
-  pages whose files are absent keep their messages, tool results, usage, and
-  export identities under the page ID, even if the original file is reparsed.
-  Trashed archived pages move the same way, retaining their saved names,
-  stars, and pins; an empty thread row holds the inherited trash scope.
-  Reverified upgrade, restore, and rebuild with an absent page on 2026-10-04.
-  Their base cannot be recovered from disk, so they link to the thread. Recall
-  entries, evidence, extraction progress, and conversation export identities
-  and session state move to the page even when its file was reparsed. The
-  upgrade batches these ID mappings before joining them to retained data. Later
-  rebuilds keep metadata scoped to each file. Activity hints still find the
-  newest surviving page without an original thread row. Reverified these
-  archive and activity paths on 2026-10-02. Other Codex versions may differ.
-  Tests: `TestCodexRevertPageSessionsThroughAPI`,
+  original thread row is gone. Explicit project assignments also follow the
+  retained page when the original is absent, including when an empty thread
+  row holds trash scope. Reverified assignment persistence through identity
+  restoration, later syncs, and folder rules on 2026-10-06. Saved
+  parser-source project identities follow their page without overwriting the
+  original thread's identity. Archived pages whose files are absent keep their
+  messages, tool results, usage, and export identities under the page ID, even
+  if the original file is reparsed. Trashed archived pages move the same way,
+  retaining their saved names, stars, and pins; an empty thread row holds the
+  inherited trash scope. Reverified upgrade, restore, and rebuild with an
+  absent page on 2026-10-04. Their base cannot be recovered from disk, so they
+  link to the thread. Recall entries, evidence, extraction progress, and
+  conversation export identities and session state move to the page even when
+  its file was reparsed. The upgrade batches these ID mappings before joining
+  them to retained data. Later rebuilds keep metadata scoped to each file.
+  Activity hints still find the newest surviving page without an original
+  thread row. Reverified these archive and activity paths on 2026-10-02. Other
+  Codex versions may differ. Tests: `TestCodexRevertPageSessionsThroughAPI`,
   `TestCodexRevertPagesFormATree`, `TestCodexRevertPagesRetainDailyUsage`,
   `TestCodexRevertPageUpgradeReplacesStaleThreadRow`,
   `TestCopySessionMetadataFrom_CodexPagePins`,
   `TestCodexPageUpgradePreservesPostgresPins`,
   `TestCodexPageUpgradeRetiresMissingPostgresHead`,
   `TestCopySessionMetadataFromCodexPageProjectSnapshot`,
+  `TestCodexPageUpgradePreservesProjectAssignment`,
   `TestCopyExcludedSessionsFromRetainsCodexThreadScope`,
   `TestCopyOrphanedCodexPagePreservesArchivedContent`,
   `TestCodexPageUpgradeRetainsRecallEvidence`,
