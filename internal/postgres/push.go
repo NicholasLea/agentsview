@@ -1209,7 +1209,7 @@ func (s *Sync) pushBatchAttempt(
 			"begin pg tx: %w", err,
 		)
 	}
-	if err := s.migrateCodexPagePins(ctx, tx, batch, markerID, legacyMarkerMachines); err != nil {
+	if err := s.migrateCodexPages(ctx, tx, batch, markerID, legacyMarkerMachines); err != nil {
 		_ = tx.Rollback()
 		return batchResult{}, err
 	}

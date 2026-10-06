@@ -112,9 +112,15 @@ projections.
 
 When an old PostgreSQL thread row held a revert page, the next push moves its
 remote pins and notes to that page before replacing the original thread. Both
-writes share a transaction, including when the page belongs to a later batch. If
-the retained page cannot be published, the push stops and keeps the original
-pins. A filtered push must include the page's project for this migration.
+writes share a transaction, including when the page belongs to a later batch.
+When the original rollout is absent locally, the push also moves remote names,
+stars, and trash state to a newly published page, then removes the duplicate
+thread transcript and usage. Existing page curation takes precedence. An empty
+thread row retains any inherited trash scope for restore and purge. If the
+retained page cannot be published, the push stops and keeps the original row. A
+filtered push must include the page's project for this migration. A surviving
+original rollout without remote pins can still be pushed when its old page has
+been removed or filtered out.
 
 ### Codex incremental import state
 

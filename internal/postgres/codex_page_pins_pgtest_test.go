@@ -25,6 +25,8 @@ func TestCodexPageUpgradePreservesPostgresPins(t *testing.T) {
 		{"excluded_page", "codex:", "codex"},
 		{"foreign_page", "codex:", "codex"},
 		{"missing_page", "codex:", "codex"},
+		{"missing_unpinned_page", "codex:", "codex"},
+		{"filtered_unpinned_page", "codex:", "codex"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const threadUUID = "11111111-1111-4111-8111-111111111111"
@@ -60,6 +62,9 @@ func TestCodexPageUpgradePreservesPostgresPins(t *testing.T) {
 			before, err := store.ListPinnedMessages(ctx, thread, "")
 			require.NoError(t, err)
 			require.Len(t, before, 1)
+			if tc.name == "missing_unpinned_page" || tc.name == "filtered_unpinned_page" {
+				require.NoError(t, store.UnpinMessage(ctx, thread, before[0].MessageID))
+			}
 			if tc.name == "other_owner" {
 				_, err = syncer.pg.ExecContext(ctx, `UPDATE sessions SET owner_marker='another-archive' WHERE id=$1`, thread)
 				require.NoError(t, err)
@@ -99,7 +104,7 @@ func TestCodexPageUpgradePreservesPostgresPins(t *testing.T) {
 			opts := storage.PusherOptions{}
 			blocked := false
 			switch tc.name {
-			case "filtered_page":
+			case "filtered_page", "filtered_unpinned_page":
 				_, err = rebuilt.AssignSessionProject(ctx, page, "page_project")
 				require.NoError(t, err)
 				opts.ExcludeProjects = []string{"page_project"}
@@ -112,9 +117,12 @@ func TestCodexPageUpgradePreservesPostgresPins(t *testing.T) {
 				_, err = syncer.pg.ExecContext(ctx, `INSERT INTO sessions(id, project, agent, machine, owner_marker) VALUES($1,'sample','codex','another-machine','another-owner')`, page)
 				require.NoError(t, err)
 				blocked = true
-			case "missing_page":
+			case "missing_page", "missing_unpinned_page":
 				require.NoError(t, rebuilt.DeleteSession(ctx, page))
 				blocked = true
+			}
+			if tc.name == "missing_unpinned_page" || tc.name == "filtered_unpinned_page" {
+				blocked = false
 			}
 			upgraded, err := New(pgURL, schema, rebuilt, "machine", true, opts)
 			require.NoError(t, err)
@@ -156,6 +164,13 @@ func TestCodexPageUpgradePreservesPostgresPins(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Zero(t, result.Errors)
+			if tc.name == "missing_unpinned_page" || tc.name == "filtered_unpinned_page" {
+				messages, err := store.GetMessages(ctx, thread, 0, 10, true)
+				require.NoError(t, err)
+				require.Len(t, messages, 1)
+				assert.Equal(t, "original answer", messages[0].Content)
+				return
+			}
 			pageMessages, err := store.GetMessages(ctx, page, 0, 10, true)
 			require.NoError(t, err)
 			require.Len(t, pageMessages, 1)
