@@ -1209,6 +1209,10 @@ func (s *Sync) pushBatchAttempt(
 			"begin pg tx: %w", err,
 		)
 	}
+	if err := s.migrateCodexPagePins(ctx, tx, batch, markerID, legacyMarkerMachines); err != nil {
+		_ = tx.Rollback()
+		return batchResult{}, err
+	}
 
 	n := 0
 	msgs := 0
@@ -2961,6 +2965,7 @@ func (s *Sync) replaceUsageEvents(
 
 type savedPostgresPin struct {
 	id                  int64
+	sessionID           string
 	ordinal             int
 	anchorOrdinal       int
 	sourceUUID          string
@@ -3115,6 +3120,7 @@ func snapshotPinnedMessages(
 	var pins []savedPostgresPin
 	for rows.Next() {
 		var pin savedPostgresPin
+		pin.sessionID = sessionID
 		if err := rows.Scan(
 			&pin.id, &pin.ordinal, &pin.anchorOrdinal,
 			&pin.note, &pin.createdAt,
@@ -3134,8 +3140,8 @@ func snapshotPinnedMessages(
 	return pins, nil
 }
 
-// restorePinnedMessages re-attaches the snapshotted pins to the new
-// message rows through the guarded identity rules; pins whose message
+// restorePinnedMessages moves the snapshotted pins from their saved session
+// to sessionID through the guarded message identity rules. Pins whose message
 // can no longer be identified are dropped.
 func restorePinnedMessages(
 	ctx context.Context, tx *sql.Tx, sessionID string,
@@ -3153,7 +3159,7 @@ func restorePinnedMessages(
 		if _, err := tx.ExecContext(ctx, `
 			DELETE FROM pinned_messages
 			WHERE session_id = $1 AND id = $2`,
-			sessionID, pin.id,
+			pin.sessionID, pin.id,
 		); err != nil {
 			return fmt.Errorf(
 				"clearing snapshotted pg pin id=%d: %w", pin.id, err,

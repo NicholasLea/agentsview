@@ -110,6 +110,12 @@ restored or purged. PostgreSQL purge retains thread-wide exclusions for later
 pushes; the hosted legacy routes use the same behavior without removing raw
 projections.
 
+When an old PostgreSQL thread row held a revert page, the next push moves its
+remote pins and notes to that page before replacing the original thread. Both
+writes share a transaction, including when the page belongs to a later batch. If
+the retained page cannot be published, the push stops and keeps the original
+pins. A filtered push must include the page's project for this migration.
+
 ### Codex incremental import state
 
 Four SQLite-only tables support local Codex imports: `parser_checkpoints` holds
