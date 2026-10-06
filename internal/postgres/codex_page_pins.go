@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/agentsview/internal/db"
@@ -27,7 +28,10 @@ func (s *Sync) migrateCodexPages(
 			prefixEnd := strings.LastIndex(sess.ID, ":") + 1
 			if prefixEnd > 0 {
 				id := sess.ID[:prefixEnd] + parser.CodexThreadIDFromSessionKey(sess.ID[prefixEnd:])
-				if sess.ID == id && sess.DataVersion < 127 {
+				// A rebuilt trash anchor has no file and may still have an old
+				// data version, even after restore. Migrate before publishing its
+				// empty transcript when the retained page is in a later batch.
+				if sess.ID == id && sess.DataVersion < 127 && sess.FilePath != nil {
 					continue
 				}
 				threads[id] = sess
@@ -106,6 +110,13 @@ func (s *Sync) migrateCodexPages(
 		var pageExists bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM sessions WHERE id = $1)`, pageID).Scan(&pageExists); err != nil {
 			return fmt.Errorf("checking retained Codex page: %w", err)
+		}
+		// Apply a selected empty anchor's current trash scope before the page
+		// can inherit it. Its messages remain available for pin matching.
+		if head != nil && !hasHead && slices.ContainsFunc(batch, func(sess db.Session) bool { return sess.ID == old.id }) {
+			if err := s.pushSession(ctx, tx, *head, markerID, legacyMarkerMachines); err != nil {
+				return fmt.Errorf("publishing Codex trash anchor metadata: %w", err)
+			}
 		}
 		if err := s.pushSession(ctx, tx, *page, markerID, legacyMarkerMachines); err != nil {
 			return fmt.Errorf("publishing retained Codex page: %w", err)

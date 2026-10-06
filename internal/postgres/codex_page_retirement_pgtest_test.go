@@ -4,6 +4,7 @@ package postgres
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -15,11 +16,13 @@ import (
 
 func TestCodexPageUpgradeRetiresMissingPostgresHead(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		pinned      bool
-		trashAction string
-		localTrash  bool
-		newerPage   bool
+		name              string
+		pinned            bool
+		trashAction       string
+		localTrash        bool
+		newerPage         bool
+		precedingSessions int
+		restoreLocal      string
 	}{
 		{name: "unpinned"},
 		{name: "pinned", pinned: true},
@@ -28,6 +31,10 @@ func TestCodexPageUpgradeRetiresMissingPostgresHead(t *testing.T) {
 		{name: "restore_thread", pinned: true, trashAction: "thread"},
 		{name: "purge_thread", pinned: true, trashAction: "purge"},
 		{name: "local_trash_restore_page", pinned: true, trashAction: "page", localTrash: true},
+		{name: "local_trash_same_batch", pinned: true, trashAction: "page", localTrash: true, precedingSessions: 48},
+		{name: "local_trash_cross_batch", pinned: true, trashAction: "page", localTrash: true, precedingSessions: 49},
+		{name: "restored_anchor_cross_batch", pinned: true, trashAction: "page", localTrash: true, precedingSessions: 49, restoreLocal: "thread"},
+		{name: "restored_page_cross_batch", pinned: true, trashAction: "page", localTrash: true, precedingSessions: 49, restoreLocal: "page"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const thread = "codex:11111111-1111-4111-8111-111111111111"
@@ -121,8 +128,30 @@ func TestCodexPageUpgradeRetiresMissingPostgresHead(t *testing.T) {
 				require.NotNil(t, localHead)
 				require.Nil(t, localHead.FilePath)
 				require.Zero(t, localHead.MessageCount)
+				require.Zero(t, localHead.DataVersion)
 			} else {
 				require.Nil(t, localHead)
+			}
+			if tc.restoreLocal != "" {
+				restoredID := page
+				if tc.restoreLocal == "thread" {
+					restoredID = thread
+				}
+				n, err := rebuilt.RestoreSession(ctx, restoredID)
+				require.NoError(t, err)
+				require.EqualValues(t, 1, n)
+				localHead, err = rebuilt.GetSessionFull(ctx, thread)
+				require.NoError(t, err)
+				require.NotNil(t, localHead)
+				require.False(t, localHead.TrashIncludesCodexPages)
+				require.Less(t, localHead.DataVersion, 127)
+			}
+			// Lexical push order puts 48 earlier sessions and the anchor/page in
+			// one batch; 49 puts the empty anchor at the end of the first batch.
+			for i := range tc.precedingSessions {
+				require.NoError(t, rebuilt.UpsertSession(ctx, db.Session{
+					ID: fmt.Sprintf("claude:earlier-%03d", i), Agent: "claude", Project: "sample", Machine: "machine",
+				}))
 			}
 			upgraded, err := New(pgURL, schema, rebuilt, "machine", true, storage.PusherOptions{})
 			require.NoError(t, err)
@@ -154,11 +183,22 @@ func TestCodexPageUpgradeRetiresMissingPostgresHead(t *testing.T) {
 				require.NoError(t, store.SoftDeleteSession(ctx, page))
 			}
 			for range 2 {
-				pushed, err = upgraded.Push(ctx, true, nil)
+				var batchEnds []int
+				pushed, err = upgraded.Push(ctx, true, func(progress storage.PushProgress) {
+					if progress.Phase == "" && progress.SessionsDone > 0 {
+						batchEnds = append(batchEnds, progress.SessionsDone)
+					}
+				})
 				require.NoError(t, err)
 				require.Zero(t, pushed.Errors)
+				switch tc.precedingSessions {
+				case 48:
+					assert.Equal(t, []int{50}, batchEnds)
+				case 49:
+					assert.Equal(t, []int{50, 51}, batchEnds)
+				}
 			}
-			visible, err := store.ListSessions(ctx, db.SessionFilter{})
+			visible, err := store.ListSessions(ctx, db.SessionFilter{IDs: []string{thread, page}, IDsExact: true})
 			require.NoError(t, err)
 			headMessages, err := store.GetMessages(ctx, thread, 0, 10, true)
 			require.NoError(t, err)
@@ -196,6 +236,19 @@ func TestCodexPageUpgradeRetiresMissingPostgresHead(t *testing.T) {
 				assert.Equal(t, wantNote, *pins[0].Note)
 			} else {
 				assert.Empty(t, pins)
+			}
+			if tc.restoreLocal != "" {
+				anchor, err := store.GetSessionFull(ctx, thread)
+				require.NoError(t, err)
+				require.NotNil(t, anchor)
+				if tc.restoreLocal == "thread" {
+					assert.Nil(t, anchor.DeletedAt)
+					assert.NotNil(t, pageRow.DeletedAt)
+				} else {
+					assert.NotNil(t, anchor.DeletedAt)
+					assert.Nil(t, pageRow.DeletedAt)
+				}
+				return
 			}
 			if tc.trashAction == "" {
 				if tc.newerPage {

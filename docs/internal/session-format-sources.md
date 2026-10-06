@@ -604,6 +604,8 @@ fixtures retain this field; missing identities remain source-local.
   notes before replacing the thread's messages. When the original rollout is
   absent, PostgreSQL retires its duplicate transcript and usage after
   preserving page curation; an empty thread row retains any inherited trash
+  scope. Empty thread rows preserve page curation across push batch
+  boundaries, including when a local restore has already cleared their trash
   scope. Verified through a real archive upgrade, repeated pushes, and trash
   restore/purge on 2026-10-06. Saved names and stars follow the page when the
   original thread row is gone. Explicit project assignments also follow the
