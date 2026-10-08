@@ -565,7 +565,8 @@ CREATE INDEX IF NOT EXISTS idx_provider_freshness_updated_at
 // rows with source_subtype peer_message instead of user prompts. Re-parse
 // unchanged Claude sources so user-message counts and first messages drop
 // them.)
-// Version 127 records stable Hermes cron groups under one project.
+// (127: Record stable Hermes cron groups under one project. Re-parse
+// unchanged Hermes sources to recover job IDs and recorded names.)
 const dataVersion = 127
 
 const tokenCoverageRepairStatsKey = "token_coverage_repair_v1"
