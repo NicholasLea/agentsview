@@ -11,6 +11,10 @@ The latest published release is
 
 **New features**
 
+- Usage attribution opens Hermes cron job groups under one `hermes-cron`
+  project. Stable job IDs keep renamed and compressed runs together; recorded
+  names label the groups, with IDs on hover.
+
 - The web UI reports an anonymous `app_opened` event through the server when it
   loads and on the first focus of each later UTC day.
   `AGENTSVIEW_TELEMETRY_ENABLED=0` turns it off with the daemon ping.

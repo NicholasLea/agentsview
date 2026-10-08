@@ -565,7 +565,8 @@ CREATE INDEX IF NOT EXISTS idx_provider_freshness_updated_at
 // rows with source_subtype peer_message instead of user prompts. Re-parse
 // unchanged Claude sources so user-message counts and first messages drop
 // them.)
-const dataVersion = 126
+// Version 127 records stable Hermes cron groups under one project.
+const dataVersion = 127
 
 const tokenCoverageRepairStatsKey = "token_coverage_repair_v1"
 
@@ -2487,6 +2488,14 @@ func schemaColumnMigrations() []schemaColumnMigration {
 			"ALTER TABLE sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT ''",
 		},
 		{
+			"sessions", "group_key",
+			"ALTER TABLE sessions ADD COLUMN group_key TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			"sessions", "group_label",
+			"ALTER TABLE sessions ADD COLUMN group_label TEXT NOT NULL DEFAULT ''",
+		},
+		{
 			"sessions", "transcript_fidelity",
 			"ALTER TABLE sessions ADD COLUMN transcript_fidelity TEXT NOT NULL DEFAULT ''",
 		},
@@ -2878,6 +2887,8 @@ WHEN (
     OLD.git_branch IS NOT NEW.git_branch OR
     OLD.source_session_id IS NOT NEW.source_session_id OR
     OLD.source_version IS NOT NEW.source_version OR
+    OLD.group_key IS NOT NEW.group_key OR
+    OLD.group_label IS NOT NEW.group_label OR
     OLD.transcript_fidelity IS NOT NEW.transcript_fidelity OR
     OLD.parser_malformed_lines IS NOT NEW.parser_malformed_lines OR
     OLD.is_truncated IS NOT NEW.is_truncated OR
