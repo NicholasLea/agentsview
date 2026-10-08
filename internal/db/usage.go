@@ -2842,7 +2842,10 @@ func GroupTopSessions(entries []TopSessionEntry, limit int, sortBy string, token
 		row.SessionID = ""
 		row.DisplayName = row.GroupLabel
 		if row.DisplayName == "" {
-			row.DisplayName = row.GroupKey
+			row.DisplayName, _, _ = strings.Cut(row.GroupKey, "@")
+			if _, job, ok := strings.Cut(row.DisplayName, "~"); ok {
+				row.DisplayName = job
+			}
 		}
 		out = append(out, *row)
 	}
