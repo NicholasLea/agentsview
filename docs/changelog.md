@@ -236,6 +236,8 @@ The latest published release is
 
 **Bug fixes**
 
+- DeepSeek Harness v4 sessions now appear after sync, with tool results and
+  recorded token usage.
 - Oversized telemetry requests return HTTP 413.
 - Tool calls whose input is a raw script or patch, such as Codex `exec` and
   `apply_patch` calls, now show that input when expanded. Copy input, Copy
