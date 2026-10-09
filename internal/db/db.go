@@ -566,9 +566,10 @@ CREATE INDEX IF NOT EXISTS idx_provider_freshness_updated_at
 // unchanged Claude sources so user-message counts and first messages drop
 // them.)
 // (127: reparse readable sources to classify headless workers as subagents.)
-// (128: Record stable Hermes cron groups under one project. Re-parse
+// (128: reparse all sources to recover TraeX mutation rollouts and per-response usage.)
+// (129: Record stable Hermes cron groups under one project. Re-parse
 // unchanged Hermes sources to recover job IDs and recorded names.)
-const dataVersion = 128
+const dataVersion = 129
 
 const tokenCoverageRepairStatsKey = "token_coverage_repair_v1"
 
