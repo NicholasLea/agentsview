@@ -33,9 +33,10 @@ coding yesterday?" — across multiple coding agents from one archive.
     Assistant**, **Pi**, **Prime Agent**, **Gemini**, **Qwen Code**, **OpenClaw**,
     **QClaw**, **Hermes**, **WorkBuddy**, **Forge**, **Piebald**, **Antigravity
     IDE/CLI**, **Zed**, **VS Code Copilot**, **Visual Studio Copilot**, **Mistral
-    Vibe**, **gptme**, and **Amp**. Version 0.44.0 also adds coverage for **Cline
-    CLI**, **Tencent CodeBuddy CN**, **Augure Code**, **Augure Desktop 3 beta**, and
-    **Charm Crush**, and reads **DeepSeek Harness** formats through version 3.
+    Vibe**, **gptme**, **Amp**, **Junie CLI**, **OMO**, and **StepCode**. Coverage
+    also includes **Cline CLI**, **Tencent CodeBuddy CN**, **Augure Code**,
+    **Augure Desktop 3 beta**, and **Charm Crush**, and reads **DeepSeek Harness**
+    formats through version 3.
 
     Coverage depends on what each agent records. AgentsView uses recorded costs
     when available; otherwise it estimates cost from usable token counts and a
@@ -52,6 +53,11 @@ Augure Code and Augure Desktop retain recorded usage. Proprietary Augure models
 have no catalog price, so token-based cost estimates remain unpriced unless you
 add [custom model pricing](#custom-model-pricing). Recorded authoritative costs
 are retained when the source provides them.
+
+Junie coverage is for CLI sessions; it excludes tool calls and IDE-only
+conversations. Antigravity plaintext-only transcripts include conversation,
+reasoning, and tool calls but no token usage or cost. Antigravity sessions with
+a usable database can still contribute recorded usage.
 
 When an agent filter selects only agents that do not expose per-message token
 rows, AgentsView reports that as an unsupported usage state instead of silently
@@ -218,7 +224,14 @@ cross-reference them.
 Attribution selections and sidebar session-filter changes keep the range
 selected with the chart's brush.
 
+Choose **Smooth**, **Lines**, or **Bars** in the chart header. The page
+remembers the style in your browser. Days without spend remain visible as zero,
+and you can drag across the chart to select a narrower date range. The same
+controls work in Tokens mode.
+
 ![Cost over time chart](/docs/assets/generated/screenshots/usage-cost-trend.png)
+
+![Cost over time shown as bars](/docs/assets/generated/screenshots/cost-chart-bars.png)
 
 ### Cost Attribution
 
