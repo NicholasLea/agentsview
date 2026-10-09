@@ -214,6 +214,7 @@ A stacked chart shows cost per day across the range, grouped by project, model,
 or agent — toggle the grouping with the segment buttons in the panel header.
 Each series is colored consistently with the attribution panel below so you can
 cross-reference them.
+Filter changes keep the range selected with the chart's brush.
 
 ![Cost over time chart](/docs/assets/generated/screenshots/usage-cost-trend.png)
 
