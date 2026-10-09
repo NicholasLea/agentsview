@@ -1377,14 +1377,14 @@ record is preserved through the bulk-resync rebuild-and-copy path.
 
 ## Automated Session Detection
 
-AgentsView classifies every `codex exec` run as automated, including runs with
-multiple user messages. Roborev-tagged runs are classified as automated code
-reviews. Other sessions are classified as automated when they have one or fewer
-real user messages and their first user message matches the automation
-classifier. Automated sessions (roborev reviews, title generation, warmup pings,
-changelog generation, and similar scripted runs) are filtered out of session
-lists, counts, and analytics by default — the **Include automated** toggle in
-the session filter dropdown opts them back in.
+Roborev-tagged runs are automated code reviews, including runs with multiple
+user messages. Other sessions are automated when they have one or fewer real
+user messages and their first user message matches the automation classifier.
+Automated sessions, such as roborev reviews, title generation, warmup pings, and
+changelog generation, are filtered out of session lists, counts, and analytics
+by default. The **Include automated** toggle in the session filter dropdown
+opts them back in. See [Activity](https://agentsview.io/docs/activity/) for
+headless worker classification.
 
 A set of built-in patterns covers the roborev family and AgentsView's own
 internal prompts. To teach AgentsView about first-message patterns unique to

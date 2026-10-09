@@ -507,7 +507,7 @@ CREATE INDEX IF NOT EXISTS idx_provider_freshness_updated_at
 // because the source bytes are unchanged, so existing sessions need
 // re-parsing.)
 // (112: Codex `originator=codex_exec` is persisted as session_kind
-// non-interactive so every exec session classifies as automated.
+// non-interactive so write-time normalization can identify delegated workers.
 // `thread_source=roborev` is persisted as session_kind roborev so roborev
 // reviews stay identifiable as code review. Existing Codex-format rows
 // need re-parsing.)
@@ -565,9 +565,10 @@ CREATE INDEX IF NOT EXISTS idx_provider_freshness_updated_at
 // rows with source_subtype peer_message instead of user prompts. Re-parse
 // unchanged Claude sources so user-message counts and first messages drop
 // them.)
-// (127: Record stable Hermes cron groups under one project. Re-parse
+// (127: reparse readable sources to classify headless workers as subagents.)
+// (128: Record stable Hermes cron groups under one project. Re-parse
 // unchanged Hermes sources to recover job IDs and recorded names.)
-const dataVersion = 127
+const dataVersion = 128
 
 const tokenCoverageRepairStatsKey = "token_coverage_repair_v1"
 
@@ -1251,10 +1252,13 @@ func OpenFreshIsolatedContext(ctx context.Context, path string) (*DB, error) {
 		return nil, errors.Join(err, d.CloseContext(ctx))
 	}
 	d.mu.Lock()
-	err = ensureConversationSchemaLocked(ctx, d.getWriter())
+	_, err = d.getWriter().ExecContext(ctx, sessionClassificationJournalTriggerSQL)
+	if err == nil {
+		err = ensureConversationSchemaLocked(ctx, d.getWriter())
+	}
 	d.mu.Unlock()
 	if err != nil {
-		return closeOnError(fmt.Errorf("initializing conversation export state: %w", err))
+		return closeOnError(fmt.Errorf("initializing fresh archive triggers and export state: %w", err))
 	}
 	if _, err := d.GetOrCreateDatabaseID(ctx); err != nil {
 		return closeOnError(fmt.Errorf("initializing database id: %w", err))
@@ -2683,6 +2687,9 @@ func applySchemaColumnMigrations(ctx context.Context, w *writerHandle, progress 
 	); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, sessionClassificationJournalTriggerSQL); err != nil {
+		return fmt.Errorf("installing classification journal trigger: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("committing column migrations: %w", err)
 	}
@@ -3808,6 +3815,9 @@ func ensureUsageIndexColumnsLocked(ctx context.Context,
 // complete integrity marker: rows can be copied from older DBs
 // or stale remote machines after the hash was stamped.
 func (db *DB) backfillIsAutomatedLocked(ctx context.Context, w *writerHandle) error {
+	if err := repairParentlessWorkers(ctx, w); err != nil {
+		return err
+	}
 	current := ClassifierHash()
 	if db.usageOnlyStorage() {
 		// Usage-only archives deliberately discard the text this migration

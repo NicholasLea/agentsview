@@ -263,6 +263,13 @@ The latest published release is
   `apply_patch` calls, now show that input when expanded. Copy input, Copy
   message, and in-session search include the complete input, even beyond the
   preview limit. Existing sessions need no re-import.
+- Activity counts headless Claude, Codex, and Grok workers as Subagents,
+  including scripted workers whose parent disappears. `codex exec` runs are no
+  longer automated by launch mode alone, changing the rule from
+  [agentsview#1855](https://github.com/kenn-io/agentsview/issues/1855).
+  Plain `codex exec` and Grok non-interactive runs are now included by default
+  in usage and embeddings scopes, though usage-only audits retain stored
+  automation flags.
 - Hosted raw sync keeps a session listed and searchable after its source file
   disappears from the device that uploaded it, matching the local archive.
   Before, `raw-sync watch` reporting a missing file hid the session, emptied it
