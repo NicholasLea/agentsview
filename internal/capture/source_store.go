@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"go.kenn.io/agentsview/internal/artifact"
+	"go.kenn.io/agentsview/internal/ctxio"
 	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/parser"
 	"go.kenn.io/kit/atomicfile"
@@ -311,24 +312,12 @@ func copyStableSource(
 }
 
 func copyWithContext(ctx context.Context, destination io.Writer, source io.Reader) (int64, error) {
-	reader := &contextReader{ctx: ctx, reader: source}
+	reader := ctxio.Reader{Context: ctx, Reader: source}
 	written, err := io.CopyBuffer(destination, reader, make([]byte, 64<<10))
 	if err == nil {
 		err = ctx.Err()
 	}
 	return written, err
-}
-
-type contextReader struct {
-	ctx    context.Context
-	reader io.Reader
-}
-
-func (r *contextReader) Read(data []byte) (int, error) {
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return r.reader.Read(data)
 }
 
 func (s *captureState) clearSourceStaging() error {
@@ -523,9 +512,9 @@ func (s *captureState) loadPersistedSources(
 	if err != nil {
 		return nil, false, err
 	}
-	bundle, decodeErr := DecodeTranscriptBundle(&contextReader{
-		ctx: ctx,
-		reader: io.LimitReader(
+	bundle, decodeErr := DecodeTranscriptBundle(ctxio.Reader{
+		Context: ctx,
+		Reader: io.LimitReader(
 			file, int64(s.manifest.Limits.MaxResultBytes)+1),
 	})
 	closeErr := file.Close()
