@@ -30,6 +30,7 @@ The latest published release is
   Orphaned Hermes sessions synced before the upgrade can't be reparsed and
   appear as individual sessions. For DuckDB mirrors, run
   `agentsview duckdb push --full` once.
+  Exports now use manifest v5; older importers hold them until upgraded.
 
 - The web UI reports an anonymous `app_opened` event through the server when it
   loads and on the first focus of each later UTC day.
