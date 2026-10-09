@@ -18287,6 +18287,13 @@ func (e *Engine) prepareSessionNormalizedContext(
 	return prepared, sessionWriteOK, ctx.Err()
 }
 
+func (e *Engine) historyStore() db.Store {
+	if e.archiveStore != nil {
+		return e.archiveStore
+	}
+	return e.db
+}
+
 func (e *Engine) reconcileProviderHistoryContext(
 	ctx context.Context, candidate ingest.Candidate,
 ) (ingest.HistoryResult, error) {
@@ -18305,10 +18312,7 @@ func (e *Engine) reconcileProviderHistoryContext(
 	}
 	var prior *ingest.PriorSession
 	if candidate.Parsed.Session.KeepStoredGroupKey {
-		store := e.archiveStore
-		if store == nil {
-			store = e.db
-		}
+		store := e.historyStore()
 		stored, err := store.GetSessionFull(ctx, candidate.Session.ID)
 		if err != nil {
 			return ingest.HistoryResult{}, err
@@ -18324,10 +18328,7 @@ func (e *Engine) reconcileProviderHistoryContext(
 		if sqliteMember || !parser.IsOpenClawSessionFile(filepath.Base(path)) || candidate.Session.FilePath == nil {
 			break
 		}
-		store := e.archiveStore
-		if store == nil {
-			store = e.db
-		}
+		store := e.historyStore()
 		stored, err := store.GetSessionFull(ctx, candidate.Session.ID)
 		if err != nil {
 			return ingest.HistoryResult{}, err
@@ -18343,10 +18344,7 @@ func (e *Engine) reconcileProviderHistoryContext(
 		if len(candidate.Messages) > 0 {
 			break
 		}
-		store := e.archiveStore
-		if store == nil {
-			store = e.db
-		}
+		store := e.historyStore()
 		messages, err := store.GetAllMessages(
 			context.Background(), candidate.Session.ID,
 		)
@@ -18371,10 +18369,7 @@ func (e *Engine) reconcileProviderHistoryContext(
 		}
 	default:
 		if ingest.IsOpenCodeFormatStorageAgent(agent) {
-			store := e.archiveStore
-			if store == nil {
-				store = e.db
-			}
+			store := e.historyStore()
 			stored, err := store.GetSessionFull(
 				context.Background(), candidate.Session.ID,
 			)
