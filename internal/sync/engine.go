@@ -18304,11 +18304,7 @@ func (e *Engine) reconcileProviderHistoryContext(
 		)
 	}
 	var prior *ingest.PriorSession
-	switch agent {
-	case parser.AgentHermes:
-		if !candidate.Parsed.Session.KeepStoredGroupKey {
-			break
-		}
+	if candidate.Parsed.Session.KeepStoredGroupKey {
 		store := e.archiveStore
 		if store == nil {
 			store = e.db
@@ -18320,6 +18316,8 @@ func (e *Engine) reconcileProviderHistoryContext(
 		if stored != nil {
 			prior = &ingest.PriorSession{Session: *stored}
 		}
+	}
+	switch agent {
 	case parser.AgentOpenClaw:
 		path := candidate.Parsed.Session.File.Path
 		_, _, sqliteMember := parser.ParseVirtualSourcePathForBase(path, "openclaw-agent.sqlite")

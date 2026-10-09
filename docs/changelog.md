@@ -30,6 +30,8 @@ The latest published release is
   selected item. Unchecking the selected item in a picker clears the selection.
   **All projects**, Escape, and Backspace return with current dates, filters,
   and selection. The Projects picker hides projects.
+  Project and model selections reset on reload; an agent selection is the header
+  Agent filter.
 
 - The web UI reports an anonymous `app_opened` event through the server when it
   loads and on the first focus of each later UTC day.
