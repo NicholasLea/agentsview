@@ -88,6 +88,23 @@ func AntigravityTitleDatabasePath(root string) string {
 	return filepath.Join(root, antigravitySummariesDBName)
 }
 
+// AntigravityTitleDatabaseForSource returns the summaries database that
+// parsing reads for an Antigravity session source, or "" when path is neither
+// a conversations/<uuid>.db nor a brain transcript. The database belongs to
+// the IDE root holding the source, never to an ancestor or sibling root.
+func AntigravityTitleDatabaseForSource(path string) string {
+	if root, _, ok := antigravityBrainTranscriptConversation(path); ok {
+		return AntigravityTitleDatabasePath(root)
+	}
+	clean := filepath.Clean(path)
+	id, ok := strings.CutSuffix(filepath.Base(clean), ".db")
+	conversations := filepath.Dir(clean)
+	if !ok || !IsValidSessionID(id) || filepath.Base(conversations) != "conversations" {
+		return ""
+	}
+	return AntigravityTitleDatabasePath(filepath.Dir(conversations))
+}
+
 // QoderTitleDatabasePaths returns the existing Qoder application databases, in
 // qoderClientDirs order. Missing builds are omitted rather than guessed, so
 // unsupported platforms contribute nothing.
@@ -305,7 +322,7 @@ func ReadSharedTitles(
 	}
 	defer db.Close()
 
-	query := ""
+	var query string
 	switch database.Agent {
 	case AgentAntigravity:
 		query = "SELECT conversation_id, title FROM conversation_summaries"
@@ -368,7 +385,7 @@ func readTitleFromDatabase(
 	}
 	defer db.Close()
 
-	query := ""
+	var query string
 	switch database.Agent {
 	case AgentAntigravity:
 		query = "SELECT title FROM conversation_summaries WHERE conversation_id = ? LIMIT 1"

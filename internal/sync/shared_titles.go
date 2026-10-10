@@ -42,7 +42,7 @@ func (e *Engine) isConfiguredSharedTitleSHMPath(path string) bool {
 			switch agent {
 			case parser.AgentAntigravity:
 				expected = filepath.Join(root, "conversation_summaries.db")
-			case parser.AgentQoder:
+			default: // parser.AgentQoder
 				expected = parser.QoderTitleDatabaseForLocalSource(root)
 			}
 			if expected != "" && main == filepath.Clean(expected) {
@@ -78,18 +78,21 @@ func (e *Engine) sharedTitleDatabases() []parser.SharedTitleDatabase {
 
 // SyncSharedTitlesContext refreshes the titles of already-imported sessions
 // from every shared title database reachable from the configured roots,
-// without re-reading a single transcript.
+// without re-reading a single transcript, and returns how many stored names
+// changed.
 //
 // This is the catch-up entry point. The filesystem watcher only observes a
 // rename while AgentsView is running and watching, so startup and the
 // compensation cycle use this to cover a rename that happened while the
 // process was stopped, a title database that appeared after the watcher was
-// armed, and a read that failed earlier. A failed read keeps every stored name
-// and is retried on the next cycle; it never fails a body sync and never
-// fabricates a body parse retry.
-func (e *Engine) SyncSharedTitlesContext(ctx context.Context) error {
+// armed, and a read that failed earlier. Remote full imports call it after
+// their transcript scan for the same reason: a title-only rename leaves every
+// transcript unchanged, so the scan skips them all. A failed read keeps every
+// stored name and is retried on the next cycle; it never fails a body sync and
+// never fabricates a body parse retry.
+func (e *Engine) SyncSharedTitlesContext(ctx context.Context) (int, error) {
 	if e.refuseWriteInForceParse("SyncSharedTitles") {
-		return nil
+		return 0, nil
 	}
 	e.syncMu.Lock()
 	databases := e.sharedTitleDatabases()
@@ -105,7 +108,7 @@ func (e *Engine) SyncSharedTitlesContext(ctx context.Context) error {
 
 	updated, err := e.refreshSharedTitleDatabasesLocked(ctx, databases)
 	stats.RecordTitlesUpdated(updated)
-	return errors.Join(err, ctx.Err())
+	return updated, errors.Join(err, ctx.Err())
 }
 
 // refreshSharedTitleDatabasesLocked applies every planned database refresh and
@@ -281,8 +284,11 @@ func (e *Engine) sharedTitleForSession(ctx context.Context, database parser.Shar
 }
 
 // antigravityTitleOwnsSource permits local and transported summaries only for
-// the IDE root and machine that own the transcript. Remote stored identities
-// must resolve to a physical source and round-trip through the import mapping.
+// the IDE root and machine that own the transcript. The owning root is the one
+// parsing reads the title from, derived from the transcript's own layout, so a
+// nested or sibling root's database never applies, whatever the sweep order.
+// Remote stored identities must resolve to a physical source and round-trip
+// through the import mapping.
 func (e *Engine) antigravityTitleOwnsSource(databasePath, storedPath, machine string) bool {
 	root := filepath.Dir(databasePath)
 	physical := storedPath
@@ -306,19 +312,8 @@ func (e *Engine) antigravityTitleOwnsSource(databasePath, storedPath, machine st
 			return false
 		}
 	}
-	if remote {
-		bestRoot := ""
-		for _, candidate := range e.sources().agentDirs[parser.AgentAntigravity] {
-			clean := filepath.Clean(candidate)
-			if pathWithinRoot(physical, clean) && len(clean) > len(bestRoot) {
-				bestRoot = clean
-			}
-		}
-		if bestRoot != filepath.Clean(root) {
-			return false
-		}
-	}
-	return filepath.IsAbs(physical) && pathWithinRoot(physical, root) &&
+	return filepath.IsAbs(physical) &&
+		parser.AntigravityTitleDatabaseForSource(physical) == filepath.Clean(databasePath) &&
 		(machine == "" || machine == owner) &&
 		e.machineForPath(parser.AgentAntigravity, physical) == owner
 }

@@ -1740,8 +1740,7 @@ func (e *Engine) prepareChangedPathSync(
 	// Capture container states before classifyPaths lists any session rows,
 	// matching the capture-before-discovery ordering of full syncs.
 	prepared.preContainerStates = e.captureSQLiteContainerStates(paths)
-	prepared.files, prepared.sharedTitleTasks, prepared.classificationErr =
-		e.classifyChangedPaths(ctx, paths)
+	prepared.files, prepared.sharedTitleTasks, prepared.classificationErr = e.classifyChangedPaths(ctx, paths)
 	prepared.missingPaths = omitMissingPersistentContainerPaths(
 		prepared.missingPaths, prepared.files,
 	)

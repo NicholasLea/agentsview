@@ -26,10 +26,6 @@ func newQoderProviderFactory(def AgentDef) ProviderFactory {
 	)
 }
 
-func newQoderSourceSet(roots []string) JSONLSourceSet {
-	return newQoderSourceSetWithTitleRoots(roots, roots)
-}
-
 func newQoderSourceSetWithTitleRoots(roots, titleRoots []string) JSONLSourceSet {
 	return NewJSONLSourceSet(AgentQoder, roots,
 		WithRecursive(),
@@ -55,9 +51,11 @@ func newQoderSourceSetWithTitleRoots(roots, titleRoots []string) JSONLSourceSet 
 					bestLength = len(cleanRoot)
 				}
 			}
-			parseRoots := titleRoots
-			if ownerRoot == "" || !slices.Contains(titleRoots, ownerRoot) {
-				parseRoots = nil
+			// Bind the lookup to that owner alone, so an earlier ancestor root
+			// cannot decide which application database applies.
+			var parseRoots []string
+			if ownerRoot != "" && slices.Contains(titleRoots, ownerRoot) {
+				parseRoots = []string{ownerRoot}
 			}
 			return parseQoderFile(ctx, path, parseRoots, req)
 		}),

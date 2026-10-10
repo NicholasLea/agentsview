@@ -268,6 +268,13 @@ func (pending *PreparedDeltaImport) Execute(
 		} else {
 			engineStats = engine.SyncAll(ctx, progress)
 		}
+		// A full scan skips cached transcripts and drops the planned title
+		// tasks, so reconcile every transported title store directly. After
+		// a forced parse this finds the titles already applied and adds
+		// nothing.
+		var titles int
+		titles, processErr = engine.SyncSharedTitlesContext(ctx)
+		engineStats.RecordTitlesUpdated(titles)
 	} else {
 		changedResult, processErr = engine.SyncChangedPathPlanWithOptionsContext(
 			ctx, pending.plan, syncpkg.ChangedPathSyncOptions{

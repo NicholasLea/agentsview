@@ -19,13 +19,21 @@ func TestAntigravitySharedTitleRefreshOwnedRemoteSources(t *testing.T) {
 			root := t.TempDir()
 			const bare = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 			physical := filepath.Join(root, "brain", bare, ".system_generated", "logs", "transcript.jsonl")
+			nested := filepath.Join(root, "nested-ide")
+			if mode == "nested configured root" {
+				// The transcript belongs to a configured IDE root nested inside
+				// the one whose summaries database is refreshed.
+				physical = filepath.Join(nested, "brain", bare, ".system_generated", "logs", "transcript.jsonl")
+			}
 			stored := physical
 			fullID := "antigravity:" + bare
 			machine := "remote"
 			emitter := &sharedTitleScopeRecorder{}
 			database := openTestDB(t)
-			cfg := EngineConfig{AgentDirs: map[parser.AgentType][]string{parser.AgentAntigravity: {root}}, Machine: "devbox", Emitter: emitter,
-				SourceMachines: map[parser.AgentType]map[string]string{parser.AgentAntigravity: {root: "remote"}}}
+			cfg := EngineConfig{
+				AgentDirs: map[parser.AgentType][]string{parser.AgentAntigravity: {root}}, Machine: "devbox", Emitter: emitter,
+				SourceMachines: map[parser.AgentType]map[string]string{parser.AgentAntigravity: {root: "remote"}},
+			}
 			transported := mode != "filesystem mirror" && mode != "nested foreign owner"
 			if transported {
 				cfg.Machine = "remote"
@@ -57,7 +65,7 @@ func TestAntigravitySharedTitleRefreshOwnedRemoteSources(t *testing.T) {
 				cfg.SourceMachines[parser.AgentAntigravity][filepath.Join(root, "brain")] = "otherhost"
 			}
 			if mode == "nested configured root" {
-				cfg.AgentDirs[parser.AgentAntigravity] = append(cfg.AgentDirs[parser.AgentAntigravity], filepath.Join(root, "brain"))
+				cfg.AgentDirs[parser.AgentAntigravity] = append(cfg.AgentDirs[parser.AgentAntigravity], nested)
 			}
 			if mode == "missing resolver" {
 				cfg.StoredPathResolver = nil

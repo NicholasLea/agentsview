@@ -1246,6 +1246,62 @@ func TestStartRemoteHostSync_NilEmitterSafe(t *testing.T) {
 	})
 }
 
+// TestScheduledRemoteSyncNotifiesTitleOnlyChanges drives the scheduled
+// wrapper and loop together. A remote pass that only refreshed titles writes
+// no session, yet clients must refetch to see the new names. Changes committed
+// before a failure are announced too, because the retry sees them as already
+// applied and would never announce them.
+func TestScheduledRemoteSyncNotifiesTitleOnlyChanges(t *testing.T) {
+	failure := errors.New("remote title store unreadable")
+	for _, tc := range []struct {
+		name  string
+		stats remotesync.SyncStats
+		err   error
+		emits bool
+	}{
+		{name: "title only", stats: remotesync.SyncStats{TitlesUpdated: 1}, emits: true},
+		{name: "sessions", stats: remotesync.SyncStats{SessionsSynced: 2}, emits: true},
+		{name: "titles before a failure", stats: remotesync.SyncStats{TitlesUpdated: 1}, err: failure, emits: true},
+		{name: "no change"},
+		{name: "failure without changes", err: failure},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database := dbtest.OpenTestDB(t)
+			syncFn := remoteHostSyncFunc(
+				t.Context(), config.Config{}, database, &scheduledLockOrderRunner{},
+				config.RemoteHost{Host: "test-host"},
+				func(
+					context.Context, config.Config, *db.DB, config.RemoteHost, bool,
+				) (remotesync.SyncStats, error) {
+					return tc.stats, tc.err
+				},
+			)
+			synctest.Test(t, func(t *testing.T) {
+				em := &fakeEmitter{}
+				done := make(chan struct{})
+				exited := make(chan struct{})
+				interval := 10 * time.Millisecond
+				go func() {
+					runRemoteHostSyncLoop(t.Context(), "test-host", interval, syncFn, em, nil, done)
+					close(exited)
+				}()
+
+				synctest.Wait()
+				time.Sleep(interval)
+				synctest.Wait()
+				close(done)
+				<-exited
+
+				if tc.emits {
+					assert.Equal(t, int64(1), em.count.Load())
+				} else {
+					assert.Zero(t, em.count.Load())
+				}
+			})
+		})
+	}
+}
+
 func TestCollectWatchRootsHermesSessionsWatchesStateDBParent(t *testing.T) {
 	root := t.TempDir()
 	sessionsDir := filepath.Join(root, "sessions")

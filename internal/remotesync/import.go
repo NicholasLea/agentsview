@@ -59,6 +59,8 @@ func (im Importer) ImportExtracted(
 	stats.Failed = engineStats.Failed
 	stats.Deferred = engineStats.Deferred
 	stats.incomplete = !engineStats.ProcessingComplete()
+	titles, titleErr := engine.SyncSharedTitlesContext(ctx)
+	stats.TitlesUpdated += titles
 	if err := saveEngineSkipCache(ctx, im.DB, engine, layout.paths); err != nil {
 		return stats, err
 	}
@@ -69,6 +71,9 @@ func (im Importer) ImportExtracted(
 		if err := requireCompleteProcessing(engineStats); err != nil {
 			return stats, err
 		}
+	}
+	if titleErr != nil {
+		return stats, fmt.Errorf("refresh shared titles: %w", titleErr)
 	}
 	return stats, nil
 }

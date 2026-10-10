@@ -86,6 +86,6 @@ func TestStartSharedTitleSweepRunsImmediatelyAndStopsOnCancel(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("startSharedTitleSweep did not stop after cancellation")
+		require.FailNow(t, "startSharedTitleSweep did not stop after cancellation")
 	}
 }

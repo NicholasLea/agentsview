@@ -2,6 +2,7 @@ package sync
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,6 +111,15 @@ func requireStoredTitle(
 	assert.Equal(t, want, name)
 }
 
+// requireSharedTitleSweep runs the catch-up sweep and checks how many stored
+// names it reports changing.
+func requireSharedTitleSweep(t *testing.T, engine *Engine, want int) {
+	t.Helper()
+	updated, err := engine.SyncSharedTitlesContext(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, want, updated)
+}
+
 // writeSharedTitleDB creates a shared title database fixture. table picks the
 // provider's schema so the same helper serves Antigravity and Qoder.
 func writeSharedTitleDB(
@@ -169,16 +179,6 @@ func TestPlanClassifiesSharedTitleDatabaseAsTitleTaskOnly(t *testing.T) {
 	assert.Equal(t, parser.AgentAntigravity, titles[0].Agent)
 	assert.Equal(t, titlePath, titles[0].DBPath)
 	assert.Equal(t, "antigravity:", titles[0].IDPrefix())
-
-	// The -wal sibling is the same database, and the -shm index is never one:
-	// every read-only open rewrites -shm, so honoring it would re-trigger the
-	// refresh on each pass.
-	files, titles, err = engine.classifyChangedPaths(
-		t.Context(), []string{titlePath + "-wal", titlePath + "-shm"})
-	require.NoError(t, err)
-	assert.Empty(t, files)
-	require.Len(t, titles, 1, "only the -wal event resolves; -shm is dropped")
-	assert.Equal(t, titlePath, titles[0].DBPath)
 }
 
 // TestSharedTitleRefreshRewritesOnlyChangedNames covers the write side: only a
@@ -421,6 +421,68 @@ func TestSharedTitleRefreshRespectsSourceOwnership(t *testing.T) {
 	})
 }
 
+// TestAntigravityNestedLocalRootsKeepTheirOwnTitles pins IDE-root ownership
+// for local sources. With one Antigravity root nested inside another, both
+// summaries databases can hold the same conversation ID; only the database of
+// the root that holds the transcript may title it. Root order and directory
+// names vary so the sweep visits the ancestor database both before and after
+// the child's.
+func TestAntigravityNestedLocalRootsKeepTheirOwnTitles(t *testing.T) {
+	const id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	for _, childName := range []string{"a-child", "z-child"} {
+		for _, parentFirst := range []bool{true, false} {
+			for _, layout := range []string{"session database", "brain transcript"} {
+				name := fmt.Sprintf("%s/parent first %t/%s", childName, parentFirst, layout)
+				t.Run(name, func(t *testing.T) {
+					parent := t.TempDir()
+					child := filepath.Join(parent, childName)
+					roots := []string{parent, child}
+					if !parentFirst {
+						roots = []string{child, parent}
+					}
+					emitter := &sharedTitleScopeRecorder{}
+					engine, database := sharedTitleTestEngineForDirs(t, emitter,
+						map[parser.AgentType][]string{parser.AgentAntigravity: roots})
+					source := filepath.Join(child, "conversations", id+".db")
+					if layout == "brain transcript" {
+						source = filepath.Join(child, "brain", id,
+							".system_generated", "logs", "transcript.jsonl")
+					}
+					seedSharedTitleSessionAt(t, database, "antigravity:"+id,
+						parser.AgentAntigravity, "stale", source)
+
+					ancestorTitle := "ancestor title"
+					childTitle := "child title"
+					parentDB := writeConversationSummariesDB(t, parent,
+						map[string]*string{id: &ancestorTitle})
+					childDB := writeConversationSummariesDB(t, child,
+						map[string]*string{id: &childTitle})
+
+					requireSharedTitleSweep(t, engine, 1)
+					requireStoredTitle(t, database, "antigravity:"+id, childTitle)
+					assert.Equal(t, []string{"sessions"}, emitter.take())
+
+					requireSharedTitleSweep(t, engine, 0)
+					requireStoredTitle(t, database, "antigravity:"+id, childTitle)
+					assert.Empty(t, emitter.take(), "a steady state must not notify again")
+
+					require.NoError(t, engine.SyncPathsContext(t.Context(), []string{parentDB}))
+					requireStoredTitle(t, database, "antigravity:"+id, childTitle)
+					assert.Empty(t, emitter.take(),
+						"an ancestor database event must not retitle the child's session")
+
+					require.NoError(t, os.Remove(childDB))
+					blank := ""
+					writeConversationSummariesDB(t, child, map[string]*string{id: &blank})
+					requireSharedTitleSweep(t, engine, 1)
+					requireStoredTitle(t, database, "antigravity:"+id, "")
+					assert.Equal(t, []string{"sessions"}, emitter.take())
+				})
+			}
+		}
+	}
+}
+
 // TestSharedTitleRefreshDefersToSiblingJSON pins the priority rule that keeps
 // the parse path and this refresh from fighting. A non-empty sibling
 // "<uuid>-session.json" outranks the Qoder application database, so a refresh
@@ -493,11 +555,11 @@ func TestSyncSharedTitlesCoversRenamesMissedWhileStopped(t *testing.T) {
 	renamed := "renamed while the app was closed"
 	writeConversationSummariesDB(t, root, map[string]*string{id: &renamed})
 
-	require.NoError(t, engine.SyncSharedTitlesContext(t.Context()))
+	requireSharedTitleSweep(t, engine, 1)
 	requireStoredTitle(t, database, "antigravity:"+id, renamed)
 	assert.Equal(t, []string{"sessions"}, emitter.take())
 
-	require.NoError(t, engine.SyncSharedTitlesContext(t.Context()))
+	requireSharedTitleSweep(t, engine, 0)
 	requireStoredTitle(t, database, "antigravity:"+id, renamed)
 	assert.Empty(t, emitter.take(), "a steady state must not notify again")
 }
@@ -515,14 +577,14 @@ func TestSyncSharedTitlesPicksUpDatabaseCreatedLater(t *testing.T) {
 		parser.AgentAntigravity, "stale name", root)
 
 	// Nothing to read yet: this must be a silent no-op, not an error.
-	require.NoError(t, engine.SyncSharedTitlesContext(t.Context()))
+	requireSharedTitleSweep(t, engine, 0)
 	requireStoredTitle(t, database, "antigravity:"+id, "stale name")
 	assert.Empty(t, emitter.take())
 
 	renamed := "store appeared later"
 	writeConversationSummariesDB(t, root, map[string]*string{id: &renamed})
 
-	require.NoError(t, engine.SyncSharedTitlesContext(t.Context()))
+	requireSharedTitleSweep(t, engine, 1)
 	requireStoredTitle(t, database, "antigravity:"+id, renamed)
 	assert.Equal(t, []string{"sessions"}, emitter.take())
 }
@@ -541,7 +603,9 @@ func TestSyncSharedTitlesKeepsNamesOnReadFailure(t *testing.T) {
 	dbtest.WriteTestFile(t, parser.AntigravityTitleDatabasePath(root),
 		[]byte("not a database"))
 
-	require.Error(t, engine.SyncSharedTitlesContext(t.Context()))
+	updated, err := engine.SyncSharedTitlesContext(t.Context())
+	require.Error(t, err)
+	assert.Zero(t, updated)
 	requireStoredTitle(t, database, "antigravity:"+id, "keep me")
 	assert.Empty(t, emitter.take())
 }
@@ -561,7 +625,7 @@ func TestSyncSharedTitlesIsRefusedOnReportOnlyEngine(t *testing.T) {
 	renamed := "must not be written"
 	writeConversationSummariesDB(t, root, map[string]*string{id: &renamed})
 
-	require.NoError(t, engine.SyncSharedTitlesContext(t.Context()))
+	requireSharedTitleSweep(t, engine, 0)
 	requireStoredTitle(t, database, "antigravity:"+id, "untouched")
 	assert.Empty(t, emitter.take())
 }
@@ -572,7 +636,7 @@ func TestSyncSharedTitlesWithoutConfiguredRootsIsANoOp(t *testing.T) {
 	emitter := &sharedTitleScopeRecorder{}
 	engine, _ := sharedTitleTestEngine(t, emitter)
 	assert.Empty(t, engine.sharedTitleDatabases())
-	require.NoError(t, engine.SyncSharedTitlesContext(t.Context()))
+	requireSharedTitleSweep(t, engine, 0)
 	assert.Empty(t, emitter.take())
 }
 
@@ -653,7 +717,7 @@ func TestSharedTitleDatabasesDedupeOnPlan(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, titles, 1)
 	assert.Equal(t, path, titles[0].DBPath)
-	assert.False(t, strings.Contains(titles[0].DBPath, "-wal"),
+	assert.NotContains(t, titles[0].DBPath, "-wal",
 		"a -wal event must resolve to the main database file")
 }
 

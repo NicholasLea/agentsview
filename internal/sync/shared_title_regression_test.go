@@ -23,7 +23,7 @@ func TestSharedTitleRegressionUsageOnlySweepIsNoop(t *testing.T) {
 	seedSharedTitleSession(t, database, "antigravity:"+id, parser.AgentAntigravity, "", root)
 	title := "source title"
 	path := writeConversationSummariesDB(t, root, map[string]*string{id: &title})
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		plan, err := engine.PlanChangedPathsContext(t.Context(), []string{path})
 		require.NoError(t, err)
 		result, err := engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
@@ -75,7 +75,7 @@ func TestSharedTitleRegressionDisabledProviderNotRefreshed(t *testing.T) {
 	seedSharedTitleSession(t, database, "antigravity:"+id, parser.AgentAntigravity, "disabled old", root)
 	title := "must not sync disabled agent"
 	writeConversationSummariesDB(t, root, map[string]*string{id: &title})
-	require.NoError(t, engine.SyncSharedTitlesContext(t.Context()))
+	requireSharedTitleSweep(t, engine, 0)
 	requireStoredTitle(t, database, "antigravity:"+id, "disabled old")
 	assert.Empty(t, emitter.take())
 }

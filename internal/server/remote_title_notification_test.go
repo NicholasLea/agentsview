@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/agentsview/internal/config"
 	"go.kenn.io/agentsview/internal/remotesync"
@@ -31,13 +32,13 @@ func TestRemoteTitleOnlySyncNotifiesSessions(t *testing.T) {
 	case event := <-events:
 		assert.Equal(t, "sessions", event.Scope)
 	default:
-		t.Fatal("a title-only remote sync must publish a session refresh")
+		require.FailNow(t, "a title-only remote sync must publish a session refresh")
 	}
 	changed = 0
 	run()
 	select {
 	case event := <-events:
-		t.Fatalf("unchanged remote sync published %s", event.Scope)
+		assert.Failf(t, "unchanged remote sync published an event", "scope %s", event.Scope)
 	default:
 	}
 }

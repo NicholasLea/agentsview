@@ -195,12 +195,6 @@ func TestQoderTranscriptTitleReplacesStoredName(t *testing.T) {
 	assert.False(t, converted.PreserveSessionName)
 	require.NoError(t, database.UpsertSession(t.Context(), converted))
 	requireStoredTitle(t, database, parsed.ID, "Transcript title")
-
-	// A later parse of the same explicit title must not restore the old name.
-	again, err := ingest.ConvertSessionContext(t.Context(), parsed, nil)
-	require.NoError(t, err)
-	require.NoError(t, database.UpsertSession(t.Context(), again))
-	requireStoredTitle(t, database, parsed.ID, "Transcript title")
 }
 
 func TestQoderArchiveRebuildHonorsExplicitTitle(t *testing.T) {

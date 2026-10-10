@@ -172,16 +172,49 @@ func TestAntigravityBrainTranscriptTitleReachesProviderParse(t *testing.T) {
 	assert.Equal(t, "list the files in the project", result.Result.Messages[0].Content)
 }
 
-// TestAntigravityTitleDatabasePathEmptyRoot ensures an empty root degrades to
-// a no-signal read rather than opening a path relative to the process cwd.
-func TestAntigravityTitleDatabasePathEmptyRoot(t *testing.T) {
-	title, present, err := readAntigravityTitle(t.Context(), "", "some-id")
-	require.NoError(t, err)
-	assert.False(t, present)
-	assert.Empty(t, title)
-}
-
 func rootFor(t *testing.T, dbPath string) string {
 	t.Helper()
 	return filepath.Dir(filepath.Dir(dbPath))
+}
+
+// TestAntigravityTitleDatabaseForSource pins the ownership rule the sync
+// sweep shares with Parse: a source's summaries database is the one in the IDE
+// root that holds it, even when that root is nested inside another root.
+func TestAntigravityTitleDatabaseForSource(t *testing.T) {
+	const id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child-ide")
+	for _, tc := range []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "session database",
+			source: filepath.Join(parent, "conversations", id+".db"),
+			want:   AntigravityTitleDatabasePath(parent),
+		},
+		{
+			name:   "brain transcript",
+			source: antigravityBrainTranscriptPath(parent, id),
+			want:   AntigravityTitleDatabasePath(parent),
+		},
+		{
+			name:   "nested root session database",
+			source: filepath.Join(child, "conversations", id+".db"),
+			want:   AntigravityTitleDatabasePath(child),
+		},
+		{
+			name:   "nested root brain transcript",
+			source: antigravityBrainTranscriptPath(child, id),
+			want:   AntigravityTitleDatabasePath(child),
+		},
+		{name: "database outside conversations", source: filepath.Join(parent, id+".db")},
+		{name: "not a session database", source: filepath.Join(parent, "conversations", id+".pb")},
+		{name: "summaries database itself", source: AntigravityTitleDatabasePath(parent)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, AntigravityTitleDatabaseForSource(tc.source))
+		})
+	}
 }

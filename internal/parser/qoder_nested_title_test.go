@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -52,4 +53,29 @@ func fmtNestedTitleCase(localChild, reverse bool) string {
 		name += " reversed roots"
 	}
 	return name
+}
+
+// TestQoderTitleBindsOwnerRootNotEarlierAncestor keeps root order out of the
+// application database binding: a configured ancestor that belongs to neither
+// client must not hide the native root that actually owns the transcript.
+func TestQoderTitleBindsOwnerRootNotEarlierAncestor(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reversed roots %t", reverse), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			native := filepath.Join(home, ".qoder", "projects")
+			writeQoderTitleTestSession(t, native, qoderTitleTestID)
+			title := "native application title"
+			writeQoderTitleDB(t, filepath.Join(home, "Library", "Application Support", qoderIntlClientApp, "main.sqlite"), map[string]*string{qoderTitleTestID: &title})
+			roots := []string{home, native}
+			if reverse {
+				roots = []string{native, home}
+			}
+			result := qoderTitleTestParse(t, qoderTitleTestProvider(t, roots), native)[0]
+			assert.True(t, result.Result.Session.SessionNamePresent)
+			assert.Equal(t, title, result.Result.Session.SessionName)
+			assert.Equal(t, DataVersionCurrent, result.DataVersion)
+		})
+	}
 }

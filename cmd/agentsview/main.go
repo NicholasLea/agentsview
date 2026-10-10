@@ -3159,7 +3159,7 @@ func scheduledReconcileTargets(cfg config.Config) []scheduledReconcileTarget {
 func startSharedTitleSweep(ctx context.Context, engine *sync.Engine) {
 	sweep := func() {
 		started := time.Now()
-		err := engine.SyncSharedTitlesContext(ctx)
+		_, err := engine.SyncSharedTitlesContext(ctx)
 		if err == nil || ctx.Err() != nil {
 			return
 		}
@@ -3276,12 +3276,16 @@ func remoteHostSyncFunc(
 			return stats, err
 		}
 		stats, err := httpRemoteCleanupRegistry.Run(runExclusive)
-		return stats.SessionsSynced, err
+		// A title-only refresh writes no session, but clients still have to
+		// refetch to see the new name.
+		return stats.SessionsSynced + stats.TitlesUpdated, err
 	}
 }
 
 // runRemoteHostSyncLoop drives the per-host sync ticker. syncFn returns
-// the number of sessions synced so we only emit when data changed.
+// the number of session rows it changed so we only emit when data changed.
+// Changes committed before a failure are still announced: the retry sees
+// them as already synchronized and would never emit for them.
 // When done is non-nil, closing it stops the loop.
 func runRemoteHostSyncLoop(
 	ctx context.Context,
@@ -3316,7 +3320,6 @@ func runRemoteHostSyncLoop(
 		}()
 		if err != nil {
 			log.Printf("scheduled remote sync %s: %v", host, err)
-			continue
 		}
 		if synced > 0 && emitter != nil {
 			emitter.Emit("sessions")

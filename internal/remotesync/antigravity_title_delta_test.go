@@ -30,7 +30,7 @@ func TestAntigravityTitleOnlyRemoteDelta(t *testing.T) {
 			titlePath := filepath.Join(root, "conversation_summaries.db")
 			conn, err := sql.Open("sqlite3", titlePath)
 			require.NoError(t, err)
-			_, err = conn.Exec(`CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT); INSERT INTO conversation_summaries VALUES (?, 'old')`, bare)
+			_, err = conn.ExecContext(t.Context(), `CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT); INSERT INTO conversation_summaries VALUES (?, 'old')`, bare)
 			require.NoError(t, err)
 			require.NoError(t, conn.Close())
 			targets := TargetSet{Dirs: map[parser.AgentType][]string{parser.AgentAntigravity: {remoteRoot}}}
@@ -56,11 +56,11 @@ func TestAntigravityTitleOnlyRemoteDelta(t *testing.T) {
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, conn.Close()) })
 				if mode == "wal" {
-					_, err = conn.Exec(`PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0`)
+					_, err = conn.ExecContext(t.Context(), `PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0`)
 					require.NoError(t, err)
 					changed += "-wal"
 				}
-				_, err = conn.Exec(`UPDATE conversation_summaries SET title = 'renamed' WHERE conversation_id = ?`, bare)
+				_, err = conn.ExecContext(t.Context(), `UPDATE conversation_summaries SET title = 'renamed' WHERE conversation_id = ?`, bare)
 				require.NoError(t, err)
 				require.FileExists(t, changed)
 			}
@@ -101,7 +101,7 @@ func TestAntigravityTitleOnlyRemoteDelta(t *testing.T) {
 			require.NotNil(t, stored.DisplayName)
 			assert.Equal(t, display, *stored.DisplayName)
 			if mode != "corrupt database" {
-				_, err = conn.Exec(`UPDATE conversation_summaries SET title = '' WHERE conversation_id = ?`, bare)
+				_, err = conn.ExecContext(t.Context(), `UPDATE conversation_summaries SET title = '' WHERE conversation_id = ?`, bare)
 				require.NoError(t, err)
 				stats, err = prepare(changed).Execute(t.Context())
 				require.NoError(t, err)

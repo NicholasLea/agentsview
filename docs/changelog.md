@@ -11,8 +11,6 @@ The latest release is
 
 **Bug fixes**
 
-<!-- Modification: 2026-10-10 20:41:14 +08:00; model: unknown (not provided by the session); platform: Codex. Updated title behavior verified against source and isolated tests; live upgrade not performed. -->
-
 - Show native Antigravity and Qoder conversation titles. Existing sessions
   receive titles during a one-time archive reparse; later renames refresh
   titles without rewriting conversation content. Qoder application database
