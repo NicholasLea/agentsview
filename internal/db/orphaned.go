@@ -148,11 +148,20 @@ func (d *DB) CopyOrphanedDataFromExcluding(
 		}
 	}
 
+	// Noncanonical rollout names have no filename mapping. Keep the original
+	// Codex-only path match so a reparsed fork is not restored as an orphan.
 	if _, err := conn.ExecContext(ctx, `
 		INSERT OR IGNORE INTO _extra_excluded_orphan_ids (id)
 		SELECT mapped.source_id FROM _codex_session_ids mapped
 		JOIN main.sessions live ON live.id = mapped.target_id
-		WHERE NOT EXISTS (SELECT 1 FROM main.sessions WHERE id = mapped.source_id)`); err != nil {
+		WHERE NOT EXISTS (SELECT 1 FROM main.sessions WHERE id = mapped.source_id)
+		UNION ALL
+		SELECT old_s.id FROM old_db.sessions old_s
+		JOIN main.sessions new_s ON new_s.file_path = old_s.file_path
+		WHERE old_s.agent = 'codex' AND new_s.agent = 'codex'
+		  AND NOT EXISTS (
+			SELECT 1 FROM _codex_session_ids WHERE source_id = old_s.id
+		  )`); err != nil {
 		return nil, fmt.Errorf("excluding stale Codex rows: %w", err)
 	}
 
