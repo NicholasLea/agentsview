@@ -48,8 +48,10 @@ func TestCodexForkUpgradeDoesNotRestoreReparsedParentIdentity(t *testing.T) {
 			}))
 			require.NoError(t, database.InsertMessages(t.Context(), []db.Message{
 				{SessionID: legacyID, Ordinal: 0, Role: "user", Content: "fork question", Timestamp: timestamp},
-				{SessionID: legacyID, Ordinal: 1, Role: "assistant", Content: "fork answer", Timestamp: timestamp,
-					Model: "gpt-5", TokenUsage: []byte(`{"input_tokens":1000,"output_tokens":500}`), OutputTokens: 500, HasOutputTokens: true},
+				{
+					SessionID: legacyID, Ordinal: 1, Role: "assistant", Content: "fork answer", Timestamp: timestamp,
+					Model: "gpt-5", TokenUsage: []byte(`{"input_tokens":1000,"output_tokens":500}`), OutputTokens: 500, HasOutputTokens: true,
+				},
 			}))
 			dbPath := database.Path()
 			require.NoError(t, database.Close())
