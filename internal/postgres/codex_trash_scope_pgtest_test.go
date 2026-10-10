@@ -371,3 +371,136 @@ func TestHostedLegacyCodexTrashScope(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexTrashScopeUpgradePreservesLaterPerFileDeletion(t *testing.T) {
+	for _, tc := range []struct {
+		name                                         string
+		missingBaseline, currentColumns, remoteTrash bool
+	}{
+		{"baseline_present", false, false, false},
+		{"older_schema_local_trash", true, false, false},
+		{"older_schema_remote_trash", true, false, true},
+		{"unfinished_baseline_fast_path", true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			const schema = "agentsview_codex_scope_upgrade_test"
+			pgURL := testPGURL(t)
+			cleanNamedPGSchema(t, pgURL, schema)
+			t.Cleanup(func() { cleanNamedPGSchema(t, pgURL, schema) })
+			pg, err := Open(pgURL, schema, true)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, pg.Close()) })
+			require.NoError(t, EnsureSchema(ctx, pg, schema))
+			store := &Store{pg: pg}
+
+			source := testDB(t)
+			sourcePath := source.Path()
+			sourceFile := filepath.Join(t.TempDir(), "rollout-2026-01-01T00-00-00-11111111-1111-4111-8111-111111111111.jsonl")
+			require.NoError(t, source.UpsertSession(ctx, db.Session{ID: codexTrashThread, Agent: "codex", Project: "sample", Machine: "machine", DataVersion: 126, FilePath: &sourceFile, MessageCount: 1, UserMessageCount: 1}))
+			require.NoError(t, source.InsertMessages(ctx, []db.Message{{SessionID: codexTrashThread, Role: "user", Content: "Original retained message", SourceUUID: "original-message"}}))
+			require.NoError(t, source.SoftDeleteSession(ctx, codexTrashThread))
+			syncer := &Sync{pg: pg, local: source, machine: "machine", schema: schema, schemaDone: true}
+			_, err = syncer.Push(ctx, true, nil)
+			require.NoError(t, err)
+			before, err := store.GetSessionFull(ctx, codexTrashThread)
+			require.NoError(t, err)
+			require.NotNil(t, before)
+			require.NotNil(t, before.DeletedAt)
+			// Restore historical migration inputs, including an interrupted
+			// upgrade whose columns exist but whose data backfills have not run.
+			if !tc.currentColumns {
+				_, err = pg.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN trash_includes_codex_pages, DROP COLUMN source_trash_includes_codex_pages;
+					ALTER TABLE excluded_sessions DROP COLUMN include_codex_pages`)
+				require.NoError(t, err)
+			}
+			_, err = pg.ExecContext(ctx, `DELETE FROM sync_metadata WHERE key=$1`, codexThreadScopeMetadataKey)
+			require.NoError(t, err)
+			if tc.missingBaseline {
+				if tc.currentColumns {
+					_, err = pg.ExecContext(ctx, `UPDATE sessions SET source_deleted_at=NULL`)
+				} else {
+					_, err = pg.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN source_deleted_at, DROP COLUMN source_display_name`)
+				}
+				require.NoError(t, err)
+				_, err = pg.ExecContext(ctx, `DELETE FROM sync_metadata WHERE key=$1`, sourceCurationBackfillMetadataKey)
+				require.NoError(t, err)
+			}
+			require.NoError(t, source.Close())
+			raw, err := sql.Open("sqlite3", sourcePath)
+			require.NoError(t, err)
+			_, err = raw.ExecContext(ctx, `PRAGMA user_version=126`)
+			require.NoError(t, err)
+			require.NoError(t, raw.Close())
+			local, err := db.OpenIsolated(ctx, filepath.Join(t.TempDir(), "rebuilt.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, local.Close()) })
+			require.NoError(t, local.CopyArchiveIdentityFrom(sourcePath))
+			require.NoError(t, local.CopySyncStateFrom(sourcePath))
+			_, err = local.CopyTrashedDataFrom(sourcePath)
+			require.NoError(t, err)
+			require.NoError(t, local.UpsertSession(ctx, db.Session{ID: codexTrashPage, Agent: "codex", Project: "sample", Machine: "machine", DataVersion: db.CurrentDataVersion(), ParentSessionID: new(codexTrashThread), RelationshipType: "continuation", MessageCount: 1, UserMessageCount: 1}))
+			require.NoError(t, local.InsertMessages(ctx, []db.Message{{SessionID: codexTrashPage, Role: "user", Content: "Retained sibling page", SourceUUID: "page-message"}}))
+			require.NoError(t, local.CopySessionMetadataFrom(sourcePath))
+			for _, id := range []string{codexTrashThread, codexTrashPage} {
+				sess, err := local.GetSessionFull(ctx, id)
+				require.NoError(t, err)
+				require.NotNil(t, sess)
+				require.NotNil(t, sess.DeletedAt, "pre127 upgrade inherits thread trash")
+				n, err := local.RestoreSession(ctx, id)
+				require.NoError(t, err)
+				require.EqualValues(t, 1, n)
+			}
+			localHead, err := local.GetSessionFull(ctx, codexTrashThread)
+			require.NoError(t, err)
+			require.NotNil(t, localHead)
+			require.False(t, localHead.TrashIncludesCodexPages)
+			require.Nil(t, localHead.DeletedAt)
+			syncer.local = local
+			syncer.schemaDone = false
+			for range 2 {
+				_, err = syncer.Push(ctx, true, nil)
+				require.NoError(t, err)
+			}
+			// Re-running migration entry points must not revive the old action.
+			require.NoError(t, EnsureSchema(ctx, pg, schema))
+			head, err := store.GetSessionFull(ctx, codexTrashThread)
+			require.NoError(t, err)
+			require.NotNil(t, head)
+			assert.Nil(t, head.DeletedAt)
+			assert.False(t, head.TrashIncludesCodexPages, "local restore must end inherited thread trash")
+			page, err := store.GetSession(ctx, codexTrashPage)
+			require.NoError(t, err)
+			require.NotNil(t, page, "saved sibling is visible before the new per-file trash action")
+			require.Nil(t, page.DeletedAt)
+			if tc.remoteTrash {
+				require.NoError(t, store.SoftDeleteSession(ctx, codexTrashThread))
+			} else {
+				require.NoError(t, local.SoftDeleteSession(ctx, codexTrashThread))
+				head, err := local.GetSessionFull(ctx, codexTrashThread)
+				require.NoError(t, err)
+				require.False(t, head.TrashIncludesCodexPages, "new local trash is per-file")
+			}
+			require.NoError(t, local.UpsertSession(ctx, db.Session{ID: codexTrashReturning, Agent: "codex", Project: "sample", Machine: "machine", DataVersion: db.CurrentDataVersion()}))
+			_, err = syncer.Push(ctx, true, nil)
+			require.NoError(t, err)
+			returning, err := store.GetSessionFull(ctx, codexTrashReturning)
+			require.NoError(t, err)
+			require.NotNil(t, returning)
+			assert.Nil(t, returning.DeletedAt, "per-file trash must not hide another page")
+			page, err = store.GetSessionFull(ctx, codexTrashPage)
+			require.NoError(t, err)
+			require.NotNil(t, page)
+			assert.Nil(t, page.DeletedAt, "per-file trash must not hide the existing saved page")
+			removed, err := store.DeleteSessionIfTrashed(ctx, codexTrashThread)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, removed, "per-file purge must only remove the thread")
+			page, err = store.GetSessionFull(ctx, codexTrashPage)
+			require.NoError(t, err)
+			assert.NotNil(t, page, "per-file purge must preserve an active sibling page")
+			returning, err = store.GetSessionFull(ctx, codexTrashReturning)
+			require.NoError(t, err)
+			assert.NotNil(t, returning, "per-file purge must preserve a returning page")
+		})
+	}
+}

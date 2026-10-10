@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
@@ -991,7 +992,6 @@ func EnsureSchema(
 	}
 	step = time.Now()
 	tokenCoverageColumnsAdded := false
-	sourceCurationColumnsAdded := false
 	addedColumns, err := ensureColumns(ctx, db, existingColumns, alters)
 	if err != nil {
 		return err
@@ -1001,8 +1001,6 @@ func EnsureSchema(
 		case "has_total_output_tokens", "has_peak_context_tokens",
 			"has_context_tokens", "has_output_tokens":
 			tokenCoverageColumnsAdded = true
-		case "source_display_name", "source_deleted_at":
-			sourceCurationColumnsAdded = true
 		}
 	}
 	log.Printf(
@@ -1011,26 +1009,6 @@ func EnsureSchema(
 		time.Since(step).Round(time.Millisecond),
 		len(addedColumns),
 	)
-	step = time.Now()
-	sourceBackfilled, err := runSourceCurationBackfill(
-		ctx, db, sourceCurationColumnsAdded,
-	)
-	if err != nil {
-		return err
-	}
-	if sourceBackfilled {
-		log.Printf(
-			"pg schema: source curation baseline backfill"+
-				" completed in %s",
-			time.Since(step).Round(time.Millisecond),
-		)
-	} else {
-		log.Printf(
-			"pg schema: source curation baseline backfill"+
-				" check completed in %s (repair skipped)",
-			time.Since(step).Round(time.Millisecond),
-		)
-	}
 	if err := repairLegacySourceMissingDeletionPG(ctx, db); err != nil {
 		return err
 	}
@@ -1269,13 +1247,13 @@ func backfillIsAutomatedPG(
 // compatible-schema fast path can run them without the index and
 // column DDL that can block concurrent pg serve reads (issue #887).
 func runSchemaDataRepairsPG(ctx context.Context, db *sql.DB) error {
-	if err := backfillCodexThreadScopePG(ctx, db); err != nil {
-		return err
-	}
 	if err := backfillIsAutomatedPG(ctx, db); err != nil {
 		return err
 	}
 	if _, err := runSourceCurationBackfill(ctx, db, false); err != nil {
+		return err
+	}
+	if err := backfillCodexThreadScopePG(ctx, db); err != nil {
 		return err
 	}
 	if err := repairLegacySourceMissingDeletionPG(ctx, db); err != nil {
@@ -1340,7 +1318,7 @@ func repairLegacySourceMissingDeletionPG(ctx context.Context, pg *sql.DB) error 
 }
 
 func backfillSourceCurationBaselines(
-	ctx context.Context, pg *sql.DB,
+	ctx context.Context, pg pgSessionExecer,
 ) error {
 	if _, err := pg.ExecContext(ctx,
 		`UPDATE sessions
@@ -1364,7 +1342,7 @@ func backfillSourceCurationBaselines(
 }
 
 func runSourceCurationBackfill(
-	ctx context.Context, db *sql.DB, sourceCurationColumnsAdded bool,
+	ctx context.Context, db pgProjectIdentityExecer, sourceCurationColumnsAdded bool,
 ) (bool, error) {
 	runRepair, err := shouldRunSourceCurationBackfill(
 		ctx, db, sourceCurationColumnsAdded,
@@ -1385,7 +1363,7 @@ func runSourceCurationBackfill(
 }
 
 func shouldRunSourceCurationBackfill(
-	ctx context.Context, db *sql.DB, sourceCurationColumnsAdded bool,
+	ctx context.Context, db pgProjectIdentityExecer, sourceCurationColumnsAdded bool,
 ) (bool, error) {
 	if sourceCurationColumnsAdded {
 		return true, nil
@@ -1407,7 +1385,7 @@ func shouldRunSourceCurationBackfill(
 }
 
 func markSourceCurationBackfillDone(
-	ctx context.Context, db *sql.DB,
+	ctx context.Context, db pgSessionExecer,
 ) error {
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO sync_metadata (key, value)
@@ -1655,7 +1633,7 @@ func loadExistingColumns(
 }
 
 func ensureColumns(
-	ctx context.Context, db pgSessionExecer,
+	ctx context.Context, db pgProjectIdentityExecer,
 	existing map[string]map[string]bool,
 	migrations []columnMigration,
 ) ([]string, error) {
@@ -1716,6 +1694,30 @@ func ensureColumns(
 		}
 	}
 	if existing["excluded_sessions"]["include_codex_pages"] {
+		// Thread scope compares the source deletion baseline, including on
+		// hosted upgrades that do not call EnsureSchema.
+		sourceCurationColumnsAdded := slices.Contains(added, "source_display_name") ||
+			slices.Contains(added, "source_deleted_at")
+		step := time.Now()
+		sourceBackfilled, err := runSourceCurationBackfill(
+			ctx, db, sourceCurationColumnsAdded,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if sourceBackfilled {
+			log.Printf(
+				"pg schema: source curation baseline backfill"+
+					" completed in %s",
+				time.Since(step).Round(time.Millisecond),
+			)
+		} else {
+			log.Printf(
+				"pg schema: source curation baseline backfill"+
+					" check completed in %s (repair skipped)",
+				time.Since(step).Round(time.Millisecond),
+			)
+		}
 		if err := backfillCodexThreadScopePG(ctx, db); err != nil {
 			return nil, err
 		}
