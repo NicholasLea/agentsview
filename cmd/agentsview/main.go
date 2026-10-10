@@ -3282,8 +3282,9 @@ func remoteHostSyncFunc(
 	}
 }
 
-// runRemoteHostSyncLoop drives the per-host sync ticker. syncFn returns
-// the number of session rows it changed so we only emit when data changed.
+// runRemoteHostSyncLoop drives the per-host sync ticker. syncFn returns a
+// positive count when it synced sessions or refreshed titles, so we only emit
+// when data changed.
 // Changes committed before a failure are still announced: the retry sees
 // them as already synchronized and would never emit for them.
 // When done is non-nil, closing it stops the loop.

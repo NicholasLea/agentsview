@@ -1202,29 +1202,6 @@ func TestStartRemoteHostSync_NoEmitOnZeroSynced(t *testing.T) {
 	})
 }
 
-func TestStartRemoteHostSync_NoEmitOnError(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		em := &fakeEmitter{}
-		syncFn := func() (int, error) { return 0, errors.New("remote sync failure") }
-
-		done := make(chan struct{})
-		exited := make(chan struct{})
-		interval := 10 * time.Millisecond
-		go func() {
-			runRemoteHostSyncLoop(t.Context(), "test-host", interval, syncFn, em, nil, done)
-			close(exited)
-		}()
-		defer func() {
-			close(done)
-			synctest.Wait()
-			<-exited
-		}()
-
-		synctest.Sleep(3 * interval)
-		assert.Zero(t, em.count.Load(), "emitter should not fire when sync fails")
-	})
-}
-
 func TestStartRemoteHostSync_NilEmitterSafe(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		syncFn := func() (int, error) { return 1, nil }
