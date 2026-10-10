@@ -310,6 +310,9 @@ CREATE TABLE IF NOT EXISTS starred_sessions (
 CREATE TABLE IF NOT EXISTS excluded_sessions (
     id         TEXT PRIMARY KEY,
     include_codex_pages BOOLEAN NOT NULL DEFAULT FALSE,
+    owner_marker TEXT,
+    machine TEXT,
+    agent TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -2106,7 +2109,7 @@ func CheckSchemaCompat(
 	}
 
 	_, err = db.ExecContext(ctx,
-		`SELECT source_display_name, source_deleted_at, deletion_cause, source_trash_includes_codex_pages
+		`SELECT source_display_name, source_deleted_at, deletion_cause, source_trash_includes_codex_pages, owner_marker
 		 FROM sessions LIMIT 0`)
 	if err != nil {
 		return fmt.Errorf(
@@ -2115,7 +2118,7 @@ func CheckSchemaCompat(
 	}
 
 	_, err = db.ExecContext(ctx,
-		`SELECT id, include_codex_pages FROM excluded_sessions LIMIT 0`)
+		`SELECT id, include_codex_pages, owner_marker, machine, agent FROM excluded_sessions LIMIT 0`)
 	if err != nil {
 		return fmt.Errorf(
 			"excluded_sessions table missing required columns: %w", err,
@@ -2360,22 +2363,22 @@ func CheckSchemaCompat(
 	return nil
 }
 
-// checkPushSchemaCompat verifies session ownership columns used only by push.
+// checkPushSchemaCompat verifies columns used only by push.
 // CheckSchemaCompat also checks sync_metadata because PG serve reads machine
 // display labels from it.
 func checkPushSchemaCompat(ctx context.Context, db *sql.DB) error {
 	_, err := db.ExecContext(ctx,
-		`SELECT owner_marker, prompt_evidence_discarded FROM sessions LIMIT 0`)
+		`SELECT prompt_evidence_discarded FROM sessions LIMIT 0`)
 	if err != nil {
 		return fmt.Errorf(
-			"sessions table missing push ownership columns: %w", err)
+			"sessions table missing push columns: %w", err)
 	}
 	return nil
 }
 
 // pushSchemaCurrent reports whether the PG schema has everything a push
 // needs. CheckSchemaCompat covers the read and PG serve write paths but does
-// not require push-only sessions.owner_marker (verified by
+// not require push-only sessions.prompt_evidence_discarded (verified by
 // checkPushSchemaCompat), model_pricing (always queried by syncModelPricing)
 // or cursor_usage_events (written by syncCursorUsageEvents), so probe those
 // explicitly. It also requires the cursor dedup index, which the cursor usage

@@ -660,7 +660,7 @@ func TestEnsureSchemaScrubsProjectIdentityGitRemoteCredentials(t *testing.T) {
 func TestCheckSchemaCompatIgnoresPushOnlySchema(t *testing.T) {
 	pg, state := newSchemaProbeDB(t, nil)
 	state.execErrors = []schemaProbeQueryError{
-		{contains: "owner_marker", err: &pgconn.PgError{Code: "42703", Message: `column "owner_marker" does not exist`}},
+		{contains: "prompt_evidence_discarded", err: &pgconn.PgError{Code: "42703", Message: `column "prompt_evidence_discarded" does not exist`}},
 	}
 
 	require.NoError(t, CheckSchemaCompat(t.Context(), pg),

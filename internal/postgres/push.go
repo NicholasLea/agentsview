@@ -9,6 +9,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"iter"
 	"log"
 	"maps"
 	"slices"
@@ -389,7 +390,7 @@ func (s *Sync) PushWithOptions(
 	}
 
 	if err := purgePGExcludedPushSessions(
-		ctx, s.pg, sessionByID,
+		ctx, s.pg, sessionByID, markerID, s.machine, legacyMarkerMachines,
 	); err != nil {
 		return result, err
 	}
@@ -1773,13 +1774,13 @@ func mapKeys(m map[string]db.Session) []string {
 }
 
 func readPGExcludedSessionIDs(
-	ctx context.Context, pg pgSessionQueryer, ids []string,
-) (map[string]struct{}, error) {
-	ids = uniqueNonEmptyStrings(ids)
-	if len(ids) == 0 {
+	ctx context.Context, pg pgSessionQueryer, sessions iter.Seq[db.Session],
+	markerID, machine string, legacyMarkerMachines []string,
+) (map[string]bool, error) {
+	query, args := pgExcludedSessionIDsQuery(sessions, markerID, machine, legacyMarkerMachines)
+	if query == "" {
 		return nil, nil
 	}
-	query, args := pgExcludedSessionIDsQuery(ids)
 	rows, err := pg.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -1788,15 +1789,18 @@ func readPGExcludedSessionIDs(
 	}
 	defer rows.Close()
 
-	excluded := make(map[string]struct{})
+	excluded := make(map[string]bool)
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var scoped bool
+		if err := rows.Scan(&id, &scoped); err != nil {
 			return nil, fmt.Errorf(
 				"scanning pg excluded session id: %w", err,
 			)
 		}
-		excluded[id] = struct{}{}
+		if previous, exists := excluded[id]; !exists || previous {
+			excluded[id] = scoped
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf(
@@ -1806,26 +1810,40 @@ func readPGExcludedSessionIDs(
 	return excluded, nil
 }
 
-func pgExcludedSessionIDsQuery(ids []string) (string, []any) {
-	return `SELECT id FROM excluded_sessions
+func pgExcludedSessionIDsQuery(sessions iter.Seq[db.Session], markerID, machine string, legacyMarkerMachines []string) (string, []any) {
+	var ids, agents, machines []string
+	for sess := range sessions {
+		for _, id := range pgSessionTombstoneIDs(sess) {
+			ids = append(ids, id)
+			agents = append(agents, sess.Agent)
+			machines = append(machines, db.MirroredSessionMachine(sess, machine))
+		}
+	}
+	if len(ids) == 0 {
+		return "", nil
+	}
+	return `SELECT id, FALSE AS scoped FROM excluded_sessions
 			 WHERE id = ANY($1)
-			 UNION
-			 SELECT candidate.id FROM unnest($1::text[]) AS candidate(id)
-			 JOIN excluded_sessions e ON e.id = left(candidate.id, -37)
-			 WHERE e.include_codex_pages AND left(right(candidate.id, 37), 1) = '_'`, []any{ids}
+			 UNION ALL
+			 SELECT candidate.id, TRUE FROM (SELECT input.*, $4::text AS owner_marker
+			   FROM unnest($1::text[], $2::text[], $3::text[]) AS input(id, agent, machine)) candidate
+			 JOIN excluded_sessions scope ON scope.id = left(candidate.id, -37)
+			 WHERE scope.include_codex_pages AND left(right(candidate.id, 37), 1) = '_'
+			   AND (scope.agent IS NULL OR scope.agent = candidate.agent)
+			   AND (` + pgCodexScopeOwnerMatchSQL + `
+			     OR (scope.owner_marker = '' AND scope.machine = ANY($5)))`, []any{ids, agents, machines, markerID, legacyMarkerMachines}
 }
 
 func purgePGExcludedPushSessions(
 	ctx context.Context, pg *sql.DB, sessionByID map[string]db.Session,
+	markerID, machine string, legacyMarkerMachines []string,
 ) error {
 	tombstoneIDsBySession := make(map[string][]string, len(sessionByID))
-	candidateIDs := []string{}
 	for id, sess := range sessionByID {
 		tombstoneIDs := pgSessionTombstoneIDs(sess)
 		tombstoneIDsBySession[id] = tombstoneIDs
-		candidateIDs = append(candidateIDs, tombstoneIDs...)
 	}
-	excludedIDs, err := readPGExcludedSessionIDs(ctx, pg, candidateIDs)
+	excludedIDs, err := readPGExcludedSessionIDs(ctx, pg, maps.Values(sessionByID), markerID, machine, legacyMarkerMachines)
 	if err != nil {
 		return err
 	}
@@ -1834,12 +1852,27 @@ func purgePGExcludedPushSessions(
 	}
 
 	purgeIDs := []string{}
+	var scopedIDs []string
 	for id, tombstoneIDs := range tombstoneIDsBySession {
 		if !hasPGExcludedSessionID(tombstoneIDs, excludedIDs) {
 			continue
 		}
-		purgeIDs = append(purgeIDs, tombstoneIDs...)
+		scoped := true
+		for _, tombstoneID := range tombstoneIDs {
+			if isScoped, exists := excludedIDs[tombstoneID]; exists && !isScoped {
+				scoped = false
+				break
+			}
+		}
+		if scoped {
+			scopedIDs = append(scopedIDs, tombstoneIDs...)
+		} else {
+			purgeIDs = append(purgeIDs, tombstoneIDs...)
+		}
 		delete(sessionByID, id)
+	}
+	if err := deletePGScopedExcludedSessionRows(ctx, pg, scopedIDs); err != nil {
+		return err
 	}
 	purgeIDs = uniqueNonEmptyStrings(purgeIDs)
 	if len(purgeIDs) == 0 {
@@ -1924,7 +1957,7 @@ func listPGProjectScopeMoveCandidates(
 }
 
 func hasPGExcludedSessionID(
-	ids []string, excluded map[string]struct{},
+	ids []string, excluded map[string]bool,
 ) bool {
 	for _, id := range ids {
 		if _, ok := excluded[id]; ok {
@@ -1959,14 +1992,25 @@ func deletePGExcludedSessionRows(
 
 func deletePGSessionIfExcluded(
 	ctx context.Context, tx *sql.Tx, sess db.Session,
+	markerID, machine string, legacyMarkerMachines []string,
 ) (bool, error) {
 	ids := pgSessionTombstoneIDs(sess)
-	excluded, err := readPGExcludedSessionIDs(ctx, tx, ids)
+	excluded, err := readPGExcludedSessionIDs(ctx, tx, slices.Values([]db.Session{sess}), markerID, machine, legacyMarkerMachines)
 	if err != nil {
 		return false, err
 	}
 	if len(excluded) == 0 {
 		return false, nil
+	}
+	scoped := true
+	for _, isScoped := range excluded {
+		if !isScoped {
+			scoped = false
+			break
+		}
+	}
+	if scoped {
+		return true, deletePGScopedExcludedSessionRows(ctx, tx, ids)
 	}
 	if err := insertPGExcludedSessionIDs(ctx, tx, ids); err != nil {
 		return false, err
@@ -2207,7 +2251,16 @@ func writePGSession(ctx context.Context, tx *sql.Tx, sess db.Session, markerID s
 		return fmt.Errorf("encoding legacy marker machines: %w", err)
 	}
 	result, err := tx.ExecContext(ctx, `
-		WITH inherited_trash AS (
+		WITH candidate AS (
+			SELECT $1::text AS id, $2::text AS machine, $3::text AS owner_marker, $5::text AS agent
+		), excluded_session AS (
+			SELECT scope.id FROM excluded_sessions scope CROSS JOIN candidate
+			WHERE scope.id = candidate.id OR (scope.include_codex_pages
+				AND left(right(candidate.id, 37), 1) = '_' AND scope.id = left(candidate.id, -37)
+				AND (scope.agent IS NULL OR scope.agent = candidate.agent)
+				AND (`+pgCodexScopeOwnerMatchSQL+`
+					OR (scope.owner_marker = '' AND scope.machine IN (SELECT jsonb_array_elements_text($69::jsonb)))))
+		), inherited_trash AS (
 			SELECT deleted_at FROM sessions
 			WHERE id = left($1, -37) AND left(right($1, 37), 1) = '_'
 			  AND agent = $5 AND provenance_kind = 'legacy'
@@ -2269,9 +2322,7 @@ func writePGSession(ctx context.Context, tx *sql.Tx, sess db.Session, markerID s
 				$62, $63, $64, $65, $66, $67, $68,
 				$70, $71, $71, NOW()
 			WHERE NOT EXISTS (
-				SELECT 1 FROM excluded_sessions
-				WHERE id = $1 OR (include_codex_pages
-					AND left(right($1, 37), 1) = '_' AND id = left($1, -37))
+				SELECT 1 FROM excluded_session
 			)
 			ON CONFLICT (id) DO UPDATE SET
 			machine = EXCLUDED.machine,
@@ -2381,10 +2432,7 @@ func writePGSession(ctx context.Context, tx *sql.Tx, sess db.Session, markerID s
 			)
 			OR sessions.owner_marker = EXCLUDED.owner_marker)
 			AND NOT EXISTS (
-				SELECT 1 FROM excluded_sessions
-				WHERE id = EXCLUDED.id OR (include_codex_pages
-					AND left(right(EXCLUDED.id, 37), 1) = '_'
-					AND id = left(EXCLUDED.id, -37))
+				SELECT 1 FROM excluded_session
 			)
 			AND (
 			sessions.machine IS DISTINCT FROM EXCLUDED.machine
@@ -2518,7 +2566,7 @@ func writePGSession(ctx context.Context, tx *sql.Tx, sess db.Session, markerID s
 		return err
 	}
 	if rowsAffected, rowsErr := result.RowsAffected(); rowsErr == nil && rowsAffected == 0 {
-		excluded, excludedErr := deletePGSessionIfExcluded(ctx, tx, sess)
+		excluded, excludedErr := deletePGSessionIfExcluded(ctx, tx, sess, markerID, options.Machine, legacyMarkerMachines)
 		if excludedErr != nil {
 			return excludedErr
 		}
@@ -2551,7 +2599,7 @@ func writePGSession(ctx context.Context, tx *sql.Tx, sess db.Session, markerID s
 			return errSessionOwnershipConflict
 		}
 	}
-	excluded, excludedErr := deletePGSessionIfExcluded(ctx, tx, sess)
+	excluded, excludedErr := deletePGSessionIfExcluded(ctx, tx, sess, markerID, options.Machine, legacyMarkerMachines)
 	if excludedErr != nil {
 		return excludedErr
 	}

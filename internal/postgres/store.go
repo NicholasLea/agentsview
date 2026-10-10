@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -518,11 +519,15 @@ func restorePGSessionTx(ctx context.Context, tx *sql.Tx, id string) (int64, erro
 		return 0, err
 	}
 	if n > 0 {
-		_, err = tx.ExecContext(ctx, `UPDATE sessions
+		_, err = tx.ExecContext(ctx, `UPDATE sessions scope
 			SET trash_includes_codex_pages = FALSE, updated_at = NOW()
-			WHERE provenance_kind = 'legacy' AND trash_includes_codex_pages
-				AND (id = $1 OR (left(right($1, 37), 1) = '_'
-					AND id = left($1, -37)))`, id)
+			FROM sessions candidate
+			WHERE candidate.id = $1 AND candidate.provenance_kind = 'legacy'
+				AND scope.provenance_kind = 'legacy' AND scope.trash_includes_codex_pages
+				AND scope.agent = candidate.agent
+				AND (scope.id = candidate.id OR (left(right(candidate.id, 37), 1) = '_'
+					AND scope.id = left(candidate.id, -37)))
+				AND `+pgCodexScopeOwnerMatchSQL, id)
 		if err != nil {
 			return 0, err
 		}
@@ -719,10 +724,12 @@ func readPGTrashedSessionExclusions(
 	}
 	rows.Close()
 	if len(scopedIDs) > 0 {
-		children, err := tx.QueryContext(ctx, `SELECT id FROM sessions
-			WHERE provenance_kind = 'legacy' AND left(right(id, 37), 1) = '_'
-				AND left(id, -37) = ANY($1)
-			ORDER BY id FOR UPDATE`, scopedIDs)
+		children, err := tx.QueryContext(ctx, `SELECT candidate.id FROM sessions candidate
+			JOIN sessions scope ON scope.id = left(candidate.id, -37)
+			WHERE candidate.provenance_kind = 'legacy' AND left(right(candidate.id, 37), 1) = '_'
+				AND scope.id = ANY($1) AND scope.agent = candidate.agent
+				AND `+pgCodexScopeOwnerMatchSQL+`
+			ORDER BY candidate.id FOR UPDATE OF candidate`, scopedIDs)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -735,11 +742,18 @@ func readPGTrashedSessionExclusions(
 			if _, ok := sessionSeen[id]; !ok {
 				sessionIDs = append(sessionIDs, id)
 			}
-			addExcludedID(id)
+			// The owned thread exclusion covers this page. EmptyTrash may
+			// also have selected it above; neither path should turn inherited
+			// scope into a global exact-ID exclusion.
+			delete(excludedSeen, id)
 		}
 		if err := children.Err(); err != nil {
 			return nil, nil, nil, err
 		}
+		excludedIDs = slices.DeleteFunc(excludedIDs, func(id string) bool {
+			_, keep := excludedSeen[id]
+			return !keep
+		})
 	}
 	return sessionIDs, excludedIDs, scopedIDs, nil
 }
