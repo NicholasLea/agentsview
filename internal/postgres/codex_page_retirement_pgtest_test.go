@@ -61,7 +61,7 @@ func TestCodexPageUpgradeRetiresMissingPostgresHead(t *testing.T) {
 				TokenUsage: []byte(`{"input_tokens":10,"output_tokens":5}`), OutputTokens: 5, HasOutputTokens: true,
 			}
 			require.NoError(t, source.InsertMessages(ctx, []db.Message{message}))
-			require.NoError(t, source.SetSessionDataVersion(ctx, thread, 126))
+			require.NoError(t, source.SetSessionDataVersion(ctx, thread, 128))
 			syncer, err := New(pgURL, schema, source, "machine", true, storage.PusherOptions{})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, syncer.Close()) })
@@ -101,7 +101,7 @@ func TestCodexPageUpgradeRetiresMissingPostgresHead(t *testing.T) {
 			require.NoError(t, source.Close())
 			raw, err := sql.Open("sqlite3", sourcePath)
 			require.NoError(t, err)
-			_, err = raw.ExecContext(ctx, "PRAGMA user_version=126")
+			_, err = raw.ExecContext(ctx, "PRAGMA user_version=128")
 			require.NoError(t, err)
 			require.NoError(t, raw.Close())
 			rebuilt := testDB(t)
@@ -144,7 +144,7 @@ func TestCodexPageUpgradeRetiresMissingPostgresHead(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, localHead)
 				require.False(t, localHead.TrashIncludesCodexPages)
-				require.Less(t, localHead.DataVersion, 127)
+				require.Less(t, localHead.DataVersion, 129)
 			}
 			// Lexical push order puts 48 earlier sessions and the anchor/page in
 			// one batch; 49 puts the empty anchor at the end of the first batch.

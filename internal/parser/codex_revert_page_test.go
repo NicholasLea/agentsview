@@ -320,7 +320,7 @@ func TestCodexForkOfRevertedThreadDropsReplayedPageTurns(t *testing.T) {
 			assert.Contains(t, outcome.Results[0].RetryReason, "parent turns")
 			assert.Len(t, outcome.Results[0].Result.Messages, 5, "keep copied history until every parent directory is readable")
 			_, _, err = ResolveRawCapturePlan(t.Context(), provider, source)
-			assert.ErrorIs(t, err, ErrInvalidRawCapturePlan, "raw capture must not silently omit parent pages")
+			require.ErrorIs(t, err, ErrInvalidRawCapturePlan, "raw capture must not silently omit parent pages")
 
 			require.NoError(t, os.Chmod(pageDir, 0o755))
 			// Sync constructs providers per parse; the shared inventory must

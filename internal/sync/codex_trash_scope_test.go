@@ -35,7 +35,7 @@ func TestLegacyCodexTrashScopeSurvivesReturningPage(t *testing.T) {
 			require.NoError(t, database.Close())
 			raw, err := sql.Open("sqlite3", path)
 			require.NoError(t, err)
-			_, err = raw.ExecContext(ctx, "PRAGMA user_version=126")
+			_, err = raw.ExecContext(ctx, "PRAGMA user_version=128")
 			require.NoError(t, err)
 			require.NoError(t, raw.Close())
 			reopened, err := db.OpenIsolated(ctx, path)

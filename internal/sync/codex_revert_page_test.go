@@ -537,9 +537,9 @@ func TestCodexRevertPageUpgradeReplacesStaleThreadRow(t *testing.T) {
 			_, err = raw.ExecContext(t.Context(), `DELETE FROM sessions WHERE id IN (?, ?)`,
 				paginationSessionID(1), paginationSessionID(2))
 			require.NoError(t, err)
-			_, err = raw.ExecContext(t.Context(), `UPDATE sessions SET file_path=?,message_count=2,user_message_count=1,data_version=126 WHERE id=?`, lastPath, threadID)
+			_, err = raw.ExecContext(t.Context(), `UPDATE sessions SET file_path=?,message_count=2,user_message_count=1,data_version=128 WHERE id=?`, lastPath, threadID)
 			require.NoError(t, err)
-			_, err = raw.ExecContext(t.Context(), "PRAGMA user_version = 126")
+			_, err = raw.ExecContext(t.Context(), "PRAGMA user_version = 128")
 			require.NoError(t, err)
 			require.NoError(t, raw.Close())
 			if tc.headMissing {
@@ -620,16 +620,16 @@ func TestCodexRevertPageRebuildPreservesDeletionState(t *testing.T) {
 		pagePath    bool
 		missingPage bool
 	}{
-		{"upgrade_deleted", 126, false, "", false, false},
-		{"upgrade_trashed", 126, true, "", false, false},
-		{"current_deleted", 127, false, "", false, false},
-		{"current_trashed", 127, true, "", false, false},
-		{"remote_upgrade_deleted", 126, false, "host_a~", false, false},
-		{"remote_upgrade_trashed", 126, true, "host_a~", false, false},
-		{"upgrade_trashed_page_path", 126, true, "", true, false},
-		{"upgrade_deleted_missing_page", 126, false, "", false, true},
-		{"current_deleted_missing_page", 127, false, "", false, true},
-		{"remote_upgrade_deleted_missing_page", 126, false, "host_a~", false, true},
+		{"upgrade_deleted", 128, false, "", false, false},
+		{"upgrade_trashed", 128, true, "", false, false},
+		{"current_deleted", 129, false, "", false, false},
+		{"current_trashed", 129, true, "", false, false},
+		{"remote_upgrade_deleted", 128, false, "host_a~", false, false},
+		{"remote_upgrade_trashed", 128, true, "host_a~", false, false},
+		{"upgrade_trashed_page_path", 128, true, "", true, false},
+		{"upgrade_deleted_missing_page", 128, false, "", false, true},
+		{"current_deleted_missing_page", 129, false, "", false, true},
+		{"remote_upgrade_deleted_missing_page", 128, false, "host_a~", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -688,7 +688,7 @@ func TestCodexRevertPageRebuildPreservesDeletionState(t *testing.T) {
 				id := tc.prefix + paginationSessionID(page)
 				session, err := reopened.GetSession(t.Context(), id)
 				require.NoError(t, err)
-				if tc.version < 127 {
+				if tc.version < 129 {
 					assert.Nil(t, session, "an upgrade must keep every page hidden")
 					if tc.pagePath && page == 2 {
 						// The saved transcript belongs to this page, while the
@@ -719,7 +719,7 @@ func TestCodexRevertPageRebuildPreservesDeletionState(t *testing.T) {
 				require.Zero(t, engine.SyncAll(t.Context(), nil).Failed)
 				page, err := reopened.GetSession(t.Context(), tc.prefix+paginationSessionID(2))
 				require.NoError(t, err)
-				if tc.version < 127 {
+				if tc.version < 129 {
 					assert.Nil(t, page, "a returning file must stay deleted after the upgrade")
 				} else {
 					require.NotNil(t, page, "new per-file deletions must allow sibling pages")

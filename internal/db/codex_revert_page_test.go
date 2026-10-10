@@ -52,7 +52,7 @@ func TestCodexRevertPageSessionIDsReportsQueryError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// Before dataVersion 127 a revert page's parse overwrote its thread's row. On
+// Before dataVersion 129 a revert page's parse overwrote its thread's row. On
 // resync that stale row must go wherever the page's file now lives and for
 // every Codex-format agent, while a row whose file names no live session stays.
 func TestCopyOrphanedDataFromDropsStaleCodexFormatThreadRows(t *testing.T) {
@@ -132,7 +132,7 @@ func TestCopyOrphanedCodexPagePreservesArchivedContent(t *testing.T) {
 				require.Len(t, changes.Changes, 1)
 				oldMessageID = changes.Changes[0].MessageID
 			}
-			_, err = src.getWriter().Exec(ctx, "PRAGMA user_version = 126")
+			_, err = src.getWriter().Exec(ctx, "PRAGMA user_version = 128")
 			require.NoError(t, err)
 			require.NoError(t, src.Close())
 
@@ -216,14 +216,14 @@ func TestCopyOrphanedCodexPageHonorsExclusionsAndUpgradeVersion(t *testing.T) {
 		headMissing    bool
 		wantPage       bool
 	}{
-		{name: "upgrade", version: 126, wantPage: true},
-		{name: "current", version: 127},
-		{name: "deleted_thread", version: 126, excluded: thread},
-		{name: "deleted_page", version: 126, excluded: page},
-		{name: "parser_excluded", version: 126, excluded: page, parserExcluded: true},
-		{name: "trash_already_copied", version: 126, trash: true},
-		{name: "deleted_page_without_head", version: 126, excluded: page, headMissing: true},
-		{name: "parser_excluded_without_head", version: 126, excluded: page, parserExcluded: true, headMissing: true},
+		{name: "upgrade", version: 128, wantPage: true},
+		{name: "current", version: 129},
+		{name: "deleted_thread", version: 128, excluded: thread},
+		{name: "deleted_page", version: 128, excluded: page},
+		{name: "parser_excluded", version: 128, excluded: page, parserExcluded: true},
+		{name: "trash_already_copied", version: 128, trash: true},
+		{name: "deleted_page_without_head", version: 128, excluded: page, headMissing: true},
+		{name: "parser_excluded_without_head", version: 128, excluded: page, parserExcluded: true, headMissing: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -274,9 +274,9 @@ func TestCopySessionMetadataFromCodexPageProjectSnapshot(t *testing.T) {
 		version     int
 		headMissing bool
 	}{
-		{name: "upgrade", version: 126},
-		{name: "upgrade_without_head", version: 126, headMissing: true},
-		{name: "already_upgraded", version: 127},
+		{name: "upgrade", version: 128},
+		{name: "upgrade_without_head", version: 128, headMissing: true},
+		{name: "already_upgraded", version: 129},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -319,7 +319,7 @@ func TestCopySessionMetadataFromCodexPageProjectSnapshot(t *testing.T) {
 			require.NoError(t, dst.CopySessionMetadataFrom(srcPath))
 			after, err := dst.ListSessionProjectIdentitySnapshotsByID(ctx, []string{thread, page})
 			require.NoError(t, err)
-			if tc.version < 127 {
+			if tc.version < 129 {
 				assert.Equal(t, before[thread], after[thread], "page evidence must not overwrite the head")
 				assert.Equal(t, "sample_feature", after[page].Project)
 				assert.Equal(t, "other", after[page].GitBranch)
@@ -347,7 +347,7 @@ func TestCopyExcludedSessionsFromRetainsCodexThreadScope(t *testing.T) {
 					id TEXT PRIMARY KEY,
 					created_at TEXT NOT NULL DEFAULT '2026-09-01T00:00:00Z'
 				);
-				PRAGMA user_version = 126;`)
+				PRAGMA user_version = 128;`)
 			require.NoError(t, err)
 			const thread = "11111111-1111-4111-8111-111111111111"
 			const suffix = "_22222222-2222-4222-8222-222222222222"

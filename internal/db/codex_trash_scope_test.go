@@ -22,7 +22,7 @@ func upgradedCodexTrash(t *testing.T) *DB {
 	source := testDB(t)
 	insertSession(t, source, legacyTrashThread, "sample", func(s *Session) { s.Agent = "codex" })
 	require.NoError(t, source.SoftDeleteSession(ctx, legacyTrashThread))
-	_, err := source.getWriter().Exec(ctx, "PRAGMA user_version = 126")
+	_, err := source.getWriter().Exec(ctx, "PRAGMA user_version = 128")
 	require.NoError(t, err)
 	path := source.Path()
 	require.NoError(t, source.Close())

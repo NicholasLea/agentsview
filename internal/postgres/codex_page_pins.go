@@ -12,7 +12,7 @@ import (
 	"go.kenn.io/agentsview/internal/parser"
 )
 
-// Before data version 127, a thread row could hold a revert page's messages.
+// Before data version 129, a thread row could hold a revert page's messages.
 // Publish that page and move its remote pins before replacing the thread row.
 // If the original rollout is absent, retire the duplicate thread transcript
 // after preserving its curation. The transaction also covers later batches and
@@ -31,7 +31,7 @@ func (s *Sync) migrateCodexPages(
 				// A rebuilt trash anchor has no file and may still have an old
 				// data version, even after restore. Migrate before publishing its
 				// empty transcript when the retained page is in a later batch.
-				if sess.ID == id && sess.DataVersion < 127 && sess.FilePath != nil {
+				if sess.ID == id && sess.DataVersion < 129 && sess.FilePath != nil {
 					continue
 				}
 				threads[id] = sess
@@ -44,7 +44,7 @@ func (s *Sync) migrateCodexPages(
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, file_path, agent, machine, owner_marker, source_archive_id
 		FROM sessions
-		WHERE id = ANY($1) AND data_version < 127
+		WHERE id = ANY($1) AND data_version < 129
 		  AND provenance_kind = 'legacy' AND file_path IS NOT NULL
 		ORDER BY id FOR UPDATE`, mapKeys(threads))
 	if err != nil {
@@ -69,7 +69,7 @@ func (s *Sync) migrateCodexPages(
 	for _, old := range pages {
 		if !sameSessionOwner(
 			old.owner, old.machine, markerID,
-			pushedSessionMachine(threads[old.id], s.machine), legacyMarkerMachines,
+			db.MirroredSessionMachine(threads[old.id], s.machine), legacyMarkerMachines,
 		) {
 			continue
 		}
@@ -181,7 +181,7 @@ func retireCodexPageThread(ctx context.Context, tx *sql.Tx, threadID, pageID str
 		SELECT id, machine, owner_marker, project, agent, created_at,
 			deleted_at, source_deleted_at, deletion_cause,
 			trash_includes_codex_pages, source_trash_includes_codex_pages,
-			source_archive_id, source_database_generation, 127
+			source_archive_id, source_database_generation, 129
 		FROM retired WHERE trash_includes_codex_pages AND deleted_at IS NOT NULL`, threadID)
 	if err != nil {
 		return fmt.Errorf("retiring duplicate Codex thread: %w", err)

@@ -147,23 +147,22 @@ evidence; they do not establish whether a tool helped the task.
   `turnOrigin=human` and `origin.kind=human`, even when `promptSource=sdk`.
   AgentsView assigns `relationship_type=subagent` for parentless `sdk-cli`
   sessions with no existing relationship when the first real normalized prompt
-  has SDK origin, after queued prompts merge.
-  SDK ingress discards queued SDK origin before attachments are persisted.
-  A queued first prompt supplies no SDK evidence and blocks later-turn inference.
-  Human origin wins conflicting markers; missing origin remains ambiguous.
-  Explicit provider kinds remain intact.
-  Data version 127 reparses readable sources once. Reverified 2026-10-08
-  against parser fixtures, user-line entrypoints in sync fixtures, and
-  context-first appends in usage-only archives.
-  The first real prompt reparses an `sdk-cli` session with zero stored user
-  messages and no explicit provider kind, replacing stored streaming messages.
-  Assistant appends stay incremental. Reverified 2026-10-08 against first-prompt
-  streaming fixtures in full and usage-only archives. Deleted
-  transcripts prevent historical origin repair; stored entrypoints alone do
-  not distinguish workers from human SDK conversations. The original evidence came
-  from the installed producer and local transcripts.
-  Public source is unavailable. Queued fixtures follow the bundled ingress and
-  persistence path; no native queued-origin transcript has been captured.
+  has SDK origin, after queued prompts merge. SDK ingress discards queued SDK
+  origin before attachments are persisted. A queued first prompt supplies no
+  SDK evidence and blocks later-turn inference. Human origin wins conflicting
+  markers; missing origin remains ambiguous. Explicit provider kinds remain
+  intact. Data version 127 reparses readable sources once. Reverified
+  2026-10-08 against parser fixtures, user-line entrypoints in sync fixtures,
+  and context-first appends in usage-only archives. The first real prompt
+  reparses an `sdk-cli` session with zero stored user messages and no explicit
+  provider kind, replacing stored streaming messages. Assistant appends stay
+  incremental. Reverified 2026-10-08 against first-prompt streaming fixtures
+  in full and usage-only archives. Deleted transcripts prevent historical
+  origin repair; stored entrypoints alone do not distinguish workers from
+  human SDK conversations. The original evidence came from the installed
+  producer and local transcripts. Public source is unavailable. Queued
+  fixtures follow the bundled ingress and persistence path; no native
+  queued-origin transcript has been captured.
 
 Rechecked 2026-09-11 against the existing provider parser and its metadata
 fixtures: the first nonempty JSONL `sessionId` supplies `SourceSessionID`. A
@@ -591,14 +590,17 @@ fixtures retain this field; missing identities remain source-local.
   2026-10-02. If only pages remain and the parent's original rollout is
   missing, the fork keeps its retry marker and drops the inventories so the
   next parse rediscovers an original restored within the same filesystem
-  timestamp tick. If the original exists but an archived parent page is
-  missing, copied turns from that page can still be imported and counted
-  again; turn IDs are read from files, not retained in the archive. When
-  upgrading an archive older than data version 127, newly split pages inherit
-  the thread's permanent deletion or trash state. Permanent deletions and
-  trash retain their whole-thread scope, including pages whose files return at
-  another path after the upgrade. Restoring a thread or one of its pages
-  clears the inherited trash scope; purging the thread transfers it to permanent
+  timestamp tick. Directory read failures also keep the fork eligible for
+  retry, and raw capture rejects an incomplete parent inventory. Reverified
+  cold and warm inventories through denied and restored directory access on
+  2026-10-09. If the original exists but an archived parent page is missing,
+  copied turns from that page can still be imported and counted again; turn
+  IDs are read from files, not retained in the archive. When upgrading an
+  archive older than data version 129, newly split pages inherit the thread's
+  permanent deletion or trash state. Permanent deletions and trash retain
+  their whole-thread scope, including pages whose files return at another path
+  after the upgrade. Restoring a thread or one of its pages clears the
+  inherited trash scope; purging the thread transfers it to permanent
   exclusions. New deletions affect only the selected file. Pins follow the
   page named by the old row's file. PostgreSQL also moves remote-only pins and
   notes before replacing the thread's messages. When the original rollout is
@@ -607,11 +609,15 @@ fixtures retain this field; missing identities remain source-local.
   scope. Empty thread rows preserve page curation across push batch
   boundaries, including when a local restore has already cleared their trash
   scope. Verified through a real archive upgrade, repeated pushes, and trash
-  restore/purge on 2026-10-06. Saved names and stars follow the page when the
-  original thread row is gone. Explicit project assignments also follow the
-  retained page when the original is absent, including when an empty thread
-  row holds trash scope. Reverified assignment persistence through identity
-  restoration, later syncs, and folder rules on 2026-10-06. Saved
+  restore/purge on 2026-10-06. PostgreSQL initializes source deletion
+  baselines before legacy trash scope, so restoring locally before the first
+  upgraded push keeps later trash and purge actions per-file. Reverified older
+  schemas and unfinished baseline initialization through repeated pushes and
+  local or remote trash on 2026-10-09. Saved names and stars follow the page
+  when the original thread row is gone. Explicit project assignments also
+  follow the retained page when the original is absent, including when an
+  empty thread row holds trash scope. Reverified assignment persistence through
+  identity restoration, later syncs, and folder rules on 2026-10-06. Saved
   parser-source project identities follow their page without overwriting the
   original thread's identity. Archived pages whose files are absent keep their
   messages, tool results, usage, and export identities under the page ID, even
@@ -690,21 +696,20 @@ fixtures retain this field; missing identities remain source-local.
   `session_id` identifies the root or tree rather than the parent.
 
 - **Launch classification (reverified 2026-10-08):**
-  `session_meta.payload.originator=codex_exec` is durable producer evidence
-  of a non-interactive `codex exec` invocation. Agentsview persists that as
-  `session_kind = non-interactive` and assigns parentless runs with no existing
-  relationship to Subagents. Automation requires a roborev tag or a matching
-  built-in or user prompt pattern. Reverified against exec and native child
-  parser fixtures and stored-row classification audits. When `thread_source`
-  is `roborev` (from
-  `codex exec --thread-source roborev`), Agentsview stores
-  `session_kind = roborev` instead so roborev reviews stay identifiable as
-  code review while remaining automated. Reverified metadata ordering against
-  parser fixtures: the roborev tag survives later untagged metadata, and
-  parentless promotion uses the final session kind. Native `spawn_agent`
-  children still use `source.subagent` plus `parent_thread_id` for
-  `relationship_type = subagent`; do not pass `--thread-source subagent` from
-  roborev. Reverified against an isolated
+  `session_meta.payload.originator=codex_exec` is durable producer evidence of
+  a non-interactive `codex exec` invocation. Agentsview persists that as
+  `session_kind = non-interactive` and assigns parentless runs with no
+  existing relationship to Subagents. Automation requires a roborev tag or a
+  matching built-in or user prompt pattern. Reverified against exec and native
+  child parser fixtures and stored-row classification audits. When
+  `thread_source` is `roborev` (from `codex exec --thread-source roborev`),
+  Agentsview stores `session_kind = roborev` instead so roborev reviews stay
+  identifiable as code review while remaining automated. Reverified metadata
+  ordering against parser fixtures: the roborev tag survives later untagged
+  metadata, and parentless promotion uses the final session kind. Native
+  `spawn_agent` children still use `source.subagent` plus `parent_thread_id`
+  for `relationship_type = subagent`; do not pass `--thread-source subagent`
+  from roborev. Reverified against an isolated
   `codex-proxy exec --thread-source roborev` rollout.
 
 - **apply_patch file paths (2026-09-21):** Issue
@@ -962,15 +967,15 @@ fixtures retain this field; missing identities remain source-local.
   written by TRAE CLI 2.0, plus the flat `archived_sessions/` directory that
   `traex archive <id>` moves a rollout into. Some observed rollouts keep the
   user-facing transcript in Codex-compatible `response_item` rows. Newer
-  observed rollouts keep the same session envelope but carry transcript changes
-  in append-only `history_mutation.payload.items[]`; applied mutations accept
-  version 1 or an absent version and refuse other versions or operations,
-  or a present `items` value that isn't an array.
-  Token deltas appear in `token_usage_record.payload.usage`.
-  The sibling `history.jsonl` carries the
-  same `session_id`/Unix-seconds `ts`/prompt `text` records, and agentsview
-  consumes it as the same live-activity hint. No `session_index.jsonl` sidecar
-  is produced, so titles come from the rollout head alone.
+  observed rollouts keep the same session envelope but carry transcript
+  changes in append-only `history_mutation.payload.items[]`; applied mutations
+  accept version 1 or an absent version and refuse other versions or
+  operations, or a present `items` value that isn't an array. Token deltas
+  appear in `token_usage_record.payload.usage`. The sibling `history.jsonl`
+  carries the same `session_id`/Unix-seconds `ts`/prompt `text` records, and
+  agentsview consumes it as the same live-activity hint. No
+  `session_index.jsonl` sidecar is produced, so titles come from the rollout
+  head alone.
 - **Evidence:** `no-public-source`.
 - **Upstream:** TRAE CLI 2.0 ships only as a closed-source binary; the observed
   builds report themselves as `traecli 0.200.x`. Trae's first-party
@@ -980,8 +985,8 @@ fixtures retain this field; missing identities remain source-local.
   fixture is field-for-field Codex-shaped (`session_meta`, `event_msg`,
   `response_item`, and `token_count`, including
   `source.subagent.thread_spawn.parent_thread_id` and an `originator` of
-  `codex-tui`). A later de-identified fixture preserves the same envelope while
-  moving message, reasoning, tool call, and tool result items into
+  `codex-tui`). A later de-identified fixture preserves the same envelope
+  while moving message, reasoning, tool call, and tool result items into
   `history_mutation.payload.items[]`. These fixtures identify TraeX as a Codex
   format fork with producer-specific transcript extensions, not a fully
   independent archive format.
@@ -992,8 +997,8 @@ fixtures retain this field; missing identities remain source-local.
   repeats are suppressed using a single usage digest keyed by `response_id`
   when present, so equal counts for different responses remain distinct.
   `cache_creation_input_tokens` is unread on purpose; the only capture has 0
-  and no source shows whether it sits inside `input_tokens`.
-  Empty usage objects leave the response available for a later valid record.
+  and no source shows whether it sits inside `input_tokens`. Empty usage
+  objects leave the response available for a later valid record.
 - **Agentsview:** `internal/parser/traex.go` relabels the shared Codex parser
   (`internal/parser/codex.go`, `internal/parser/codex_provider.go`) onto the
   `traex:` ID namespace, and `internal/sync` gates the format-shaped branches
@@ -1328,15 +1333,16 @@ fixtures retain this field; missing identities remain source-local.
   that metadata; only exact `subagent_fork` retains an explicit summary parent
   as `grok:<parent-id>`, since the pinned
   [live-fork caller](https://github.com/xai-org/grok-build/blob/d71f6e0c1f5acc5469e503e192fe14824e6f8c90/crates/codegen/xai-grok-shell/src/agent/subagent/mod.rs#L1276-L1283)
-  and [copied-fork path](https://github.com/xai-org/grok-build/blob/d71f6e0c1f5acc5469e503e192fe14824e6f8c90/crates/codegen/xai-grok-shell/src/agent/subagent/mod.rs#L1287-L1306)
-  both use `ctx.parent_session_id` as source and spawner. Ordinary fork or restore
-  sessions with only `parent_session_id` remain `fork`. Spawn tool results that
-  include `subagent_id` attach that child on the parent's `spawn_subagent` call.
-  Reverified against the pinned session guide (`17-sessions.md`), the
-  `SubagentMeta` writer, and
+  and
+  [copied-fork path](https://github.com/xai-org/grok-build/blob/d71f6e0c1f5acc5469e503e192fe14824e6f8c90/crates/codegen/xai-grok-shell/src/agent/subagent/mod.rs#L1287-L1306)
+  both use `ctx.parent_session_id` as source and spawner. Ordinary fork or
+  restore sessions with only `parent_session_id` remain `fork`. Spawn tool
+  results that include `subagent_id` attach that child on the parent's
+  `spawn_subagent` call. Reverified against the pinned session guide
+  (`17-sessions.md`), the `SubagentMeta` writer, and
   [live-fork](https://github.com/xai-org/grok-build/blob/d71f6e0c1f5acc5469e503e192fe14824e6f8c90/crates/codegen/xai-grok-shell/src/agent/subagent/mod.rs#L1136-L1143),
-  [resume](https://github.com/xai-org/grok-build/blob/d71f6e0c1f5acc5469e503e192fe14824e6f8c90/crates/codegen/xai-grok-shell/src/agent/subagent/mod.rs#L1180-L1195),
-  and [copied-fork](https://github.com/xai-org/grok-build/blob/d71f6e0c1f5acc5469e503e192fe14824e6f8c90/crates/codegen/xai-grok-shell/src/agent/subagent/mod.rs#L1291-L1306)
+  [resume][grok-subagent-resume], and
+  [copied-fork](https://github.com/xai-org/grok-build/blob/d71f6e0c1f5acc5469e503e192fe14824e6f8c90/crates/codegen/xai-grok-shell/src/agent/subagent/mod.rs#L1291-L1306)
   summary writes in `subagent/mod.rs` at the commit above.
 
 - **Agentsview:** `internal/parser/grok.go`, `internal/parser/grok_provider.go`,
@@ -4156,5 +4162,6 @@ schemas keep their existing ordering behavior.
 [evener-source-3]: https://github.com/prime-radiant-inc/evener/blob/da7c06396c9848abfae362dcffce3861a6a0c95a/llm/types.go
 [evener-source-4]: https://github.com/prime-radiant-inc/evener/blob/da7c06396c9848abfae362dcffce3861a6a0c95a/agent/schema/snapshot.go
 [evener-source-5]: https://github.com/prime-radiant-inc/evener/blob/da7c06396c9848abfae362dcffce3861a6a0c95a/agent/fork.go
+[grok-subagent-resume]: https://github.com/xai-org/grok-build/blob/d71f6e0c1f5acc5469e503e192fe14824e6f8c90/crates/codegen/xai-grok-shell/src/agent/subagent/mod.rs#L1180-L1195
 [omo-configuration-paths]: https://github.com/code-yeongyu/senpi/blob/b50f58c8a21b0e94b12c4269a9a8c608e03d308c/packages/coding-agent/src/config.ts
 [omo-session-manager]: https://github.com/code-yeongyu/senpi/blob/b50f58c8a21b0e94b12c4269a9a8c608e03d308c/packages/coding-agent/src/core/session-manager.ts

@@ -567,8 +567,6 @@ CREATE INDEX IF NOT EXISTS idx_provider_freshness_updated_at
 // them.)
 // (127: reparse readable sources to classify headless workers as subagents.)
 // (128: reparse all sources to recover TraeX mutation rollouts and per-response usage.)
-||||||| parent of fffdde72a (fix(parser): store each Codex revert rollout as its own linked session (#1983))
-const dataVersion = 126
 // (129: a Codex rollout written by thread/revert,
 // rollout-<ts>-<thread>_<rollout>.jsonl, is stored as its own session
 // codex:<thread>_<rollout> linked as a continuation instead of overwriting

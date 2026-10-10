@@ -48,7 +48,7 @@ func TestCodexPageUpgradePreservesPostgresPins(t *testing.T) {
 			require.NoError(t, source.InsertMessages(ctx, []db.Message{{
 				SessionID: thread, Role: "assistant", Content: "answer saved only on page", SourceUUID: "page-answer",
 			}}))
-			require.NoError(t, source.SetSessionDataVersion(ctx, thread, 126))
+			require.NoError(t, source.SetSessionDataVersion(ctx, thread, 128))
 			syncer, err := New(pgURL, schema, source, "machine", true, storage.PusherOptions{})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, syncer.Close()) })
@@ -72,7 +72,7 @@ func TestCodexPageUpgradePreservesPostgresPins(t *testing.T) {
 			require.NoError(t, source.Close())
 			raw, err := sql.Open("sqlite3", sourcePath)
 			require.NoError(t, err)
-			_, err = raw.ExecContext(ctx, "PRAGMA user_version = 126")
+			_, err = raw.ExecContext(ctx, "PRAGMA user_version = 128")
 			require.NoError(t, err)
 			require.NoError(t, raw.Close())
 

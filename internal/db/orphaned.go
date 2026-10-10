@@ -1048,7 +1048,7 @@ func copyArtifactCheckpointLandings(ctx context.Context, tx *sql.Tx) error {
 }
 
 // Before this version, every Codex rollout of a thread shared one session ID.
-const codexRevertPageDataVersion = 127
+const codexRevertPageDataVersion = 129
 
 // CopyExcludedSessionsFrom copies the excluded_sessions table
 // from the source DB so permanently deleted sessions survive
@@ -2704,7 +2704,7 @@ func oldDBHasColumn(ctx context.Context, tx *sql.Tx, table, column string) bool 
 const dropCodexSessionIDMapSQL = `DROP VIEW IF EXISTS _codex_page_metadata; DROP TABLE IF EXISTS _codex_session_ids`
 
 // prepareCodexSessionIDMap resolves old rollout filenames once per copy.
-// The complete map also handles pre-version-40 fork identities; only pre-127
+// The complete map also handles pre-version-40 fork identities; only pre-129
 // thread-to-page mappings move curation, Recall, and conversation identities.
 // Populate in batches, then check destination IDs with joins instead of one
 // query per candidate. The view includes pages as they are copied or parsed.

@@ -82,7 +82,7 @@ the archive; S3 materializations do not record temporary paths.
 
 ### Codex deletion scope
 
-Before data version 127, deleting a Codex-format thread excluded all its rollout
+Before data version 129, deleting a Codex-format thread excluded all its rollout
 files under one ID. The upgrade marks those exclusions with
 `include_codex_pages`, so pages remain excluded even if their files were absent
 during the upgrade and return later. Copies preserve that scope across later
@@ -266,9 +266,10 @@ mirror is a disposable local derived file. A new remote SQL backend is a
 replica. Do not model it on DuckDB, and do not add a fourth role.
 
 Common pure storage helpers live in `internal/db`; every backend calls that
-owner. `BuildAnalyticsWhere`, `BuildUsageSourceFilter`, `BuildUsageSessionFilter`,
-and `BuildRecentEditsQuery` own shared reporting SQL. Helpers with different
-timestamp parsing, UTC padding, or output formats stay in their backend.
+owner. `BuildAnalyticsWhere`, `BuildUsageSourceFilter`,
+`BuildUsageSessionFilter`, and `BuildRecentEditsQuery` own shared reporting SQL.
+Helpers with different timestamp parsing, UTC padding, or output formats stay in
+their backend.
 
 ### How to add a replica backend
 

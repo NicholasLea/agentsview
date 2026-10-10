@@ -7039,10 +7039,10 @@ func TestCopySessionMetadataFrom_CodexPagePins(t *testing.T) {
 		wantID      string
 		wantOrdinal int
 	}{
-		{"unique_uuid", 126, false, false, page, 11},
-		{"duplicate_uuid", 126, true, false, page, 11},
-		{"ambiguous_duplicate", 126, true, true, "", 0},
-		{"already_upgraded", 127, false, false, thread, 1},
+		{"unique_uuid", 128, false, false, page, 11},
+		{"duplicate_uuid", 128, true, false, page, 11},
+		{"ambiguous_duplicate", 128, true, true, "", 0},
+		{"already_upgraded", 129, false, false, thread, 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
