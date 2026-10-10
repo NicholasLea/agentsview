@@ -1738,7 +1738,11 @@ func (p *codexProvider) parentTurnResolver(
 			if ctx.Err() != nil {
 				return nil, false
 			}
-			for _, path := range p.sources.findThreadSourceFiles(root, parentID) {
+			parentPaths, err := p.sources.findThreadSourceFiles(root, parentID)
+			if err != nil {
+				return nil, false
+			}
+			for _, path := range parentPaths {
 				if filepath.Clean(path) != filepath.Clean(childPath) {
 					paths = append(paths, path)
 					if CodexSessionUUIDFromFilename(filepath.Base(path)) == parentID {

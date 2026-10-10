@@ -2,6 +2,7 @@ package parser
 
 import (
 	"container/list"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -25,7 +26,7 @@ type codexThreadDirectory struct {
 	threads    map[string][]string
 }
 
-func (c *codexThreadFileCache) find(root, threadID string) []string {
+func (c *codexThreadFileCache) find(root, threadID string) ([]string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	root = filepath.Clean(root)
@@ -44,9 +45,11 @@ func (c *codexThreadFileCache) find(root, threadID string) []string {
 	}
 	c.recent.MoveToFront(elem)
 	var paths []string
-	elem.Value.(*codexThreadDirectory).collect(threadID, 0, &paths)
+	if err := elem.Value.(*codexThreadDirectory).collect(threadID, 0, &paths); err != nil {
+		return nil, err
+	}
 	slices.Sort(paths)
-	return paths
+	return paths, nil
 }
 
 func (c *codexThreadFileCache) invalidate(roots []string) {
@@ -61,17 +64,23 @@ func (c *codexThreadFileCache) invalidate(roots []string) {
 	}
 }
 
-func (d *codexThreadDirectory) collect(threadID string, depth int, paths *[]string) {
+func (d *codexThreadDirectory) collect(threadID string, depth int, paths *[]string) error {
 	info, changeTime, err := statCodexThreadDirectory(d.path)
 	if err != nil || !info.IsDir() {
 		d.info, d.children, d.threads = nil, nil, nil
-		return
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
 	}
 	if d.info == nil || !os.SameFile(info, d.info) || !info.ModTime().Equal(d.info.ModTime()) || changeTime != d.changeTime {
 		entries, err := os.ReadDir(d.path)
 		if err != nil {
 			d.info, d.children, d.threads = nil, nil, nil
-			return
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
 		}
 		children := make(map[string]*codexThreadDirectory)
 		threads := make(map[string][]string)
@@ -101,8 +110,11 @@ func (d *codexThreadDirectory) collect(threadID string, depth int, paths *[]stri
 	}
 	*paths = append(*paths, d.threads[threadID]...)
 	for _, child := range d.children {
-		child.collect(threadID, depth+1, paths)
+		if err := child.collect(threadID, depth+1, paths); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func statCodexThreadDirectory(path string) (os.FileInfo, int64, error) {

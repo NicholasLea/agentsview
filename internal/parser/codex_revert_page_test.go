@@ -4,6 +4,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -281,6 +282,66 @@ func TestCodexForkOfRevertedThreadDropsReplayedPageTurns(t *testing.T) {
 
 	assert.Equal(t, 2, sess.MessageCount, "only the fork's own turn is kept")
 	assert.Equal(t, 500, sess.TotalOutputTokens, "replayed page usage is not billed to the fork")
+
+	for _, warm := range []bool{false, true} {
+		name := "cold_inventory"
+		if warm {
+			name = "warm_inventory"
+		}
+		t.Run(name, func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				t.Skip("chmod does not remove directory read access on Windows")
+			}
+			registered, ok := ProviderFactoryByType(AgentCodex)
+			require.True(t, ok)
+			factory := newCodexProviderFactory(registered.Definition())
+			cfg := ProviderConfig{Roots: []string{root, filepath.Join(root, "missing_archive")}}
+			provider := factory.NewProvider(cfg)
+			source := requireCodexProviderSource(t, provider, forkID)
+			if warm {
+				outcome, err := provider.Parse(t.Context(), ParseRequest{Source: source})
+				require.NoError(t, err)
+				require.Len(t, outcome.Results, 1)
+				require.Equal(t, DataVersionCurrent, outcome.Results[0].DataVersion)
+				require.Equal(t, 500, outcome.Results[0].Result.Session.TotalOutputTokens)
+			}
+			t.Cleanup(func() { assert.NoError(t, os.Chmod(pageDir, 0o755)) })
+			require.NoError(t, os.Chmod(pageDir, 0o000))
+			_, err := os.ReadDir(pageDir)
+			if err == nil {
+				t.Skip("the current user bypasses directory permissions")
+			}
+			require.ErrorIs(t, err, os.ErrPermission)
+
+			outcome, err := provider.Parse(t.Context(), ParseRequest{Source: source})
+			require.NoError(t, err)
+			require.Len(t, outcome.Results, 1)
+			assert.Equal(t, DataVersionNeedsRetry, outcome.Results[0].DataVersion)
+			assert.Contains(t, outcome.Results[0].RetryReason, "parent turns")
+			assert.Len(t, outcome.Results[0].Result.Messages, 5, "keep copied history until every parent directory is readable")
+			_, _, err = ResolveRawCapturePlan(t.Context(), provider, source)
+			assert.ErrorIs(t, err, ErrInvalidRawCapturePlan, "raw capture must not silently omit parent pages")
+
+			require.NoError(t, os.Chmod(pageDir, 0o755))
+			// Sync constructs providers per parse; the shared inventory must
+			// recover without changes to the fork's source file.
+			provider = factory.NewProvider(cfg)
+			outcome, err = provider.Parse(t.Context(), ParseRequest{Source: source})
+			require.NoError(t, err)
+			require.Len(t, outcome.Results, 1)
+			result := outcome.Results[0]
+			assert.Equal(t, DataVersionCurrent, result.DataVersion)
+			assert.Empty(t, result.RetryReason)
+			require.Len(t, result.Result.Messages, 2)
+			assert.Equal(t, "fork question", result.Result.Messages[0].Content)
+			assert.Equal(t, "fork answer", result.Result.Messages[1].Content)
+			assert.Equal(t, 500, result.Result.Session.TotalOutputTokens)
+			plan, supported, err := ResolveRawCapturePlan(t.Context(), provider, source)
+			require.NoError(t, err)
+			assert.True(t, supported)
+			assert.Len(t, plan.Entries, 3, "capture the fork, parent head, and parent page")
+		})
+	}
 }
 
 func TestCodexForkWithOnlyParentPageNeedsRetry(t *testing.T) {
