@@ -87,9 +87,11 @@ func (e *Engine) sharedTitleDatabases() []parser.SharedTitleDatabase {
 // process was stopped, a title database that appeared after the watcher was
 // armed, and a read that failed earlier. Remote full imports call it after
 // their transcript scan for the same reason: a title-only rename leaves every
-// transcript unchanged, so the scan skips them all. A failed read keeps every
-// stored name and is retried on the next cycle; it never fails a body sync and
-// never fabricates a body parse retry.
+// transcript unchanged, so the scan skips them all. It returns the number of
+// refreshed names. A failed read keeps every stored name, is returned to the
+// caller, and is retried on the next cycle; it never fabricates a body parse
+// retry. Local callers log the error, while remote imports report it so the
+// import retries.
 func (e *Engine) SyncSharedTitlesContext(ctx context.Context) (int, error) {
 	if e.refuseWriteInForceParse("SyncSharedTitles") {
 		return 0, nil
