@@ -613,26 +613,34 @@ fixtures retain this field; missing identities remain source-local.
   baselines before legacy trash scope, so restoring locally before the first
   upgraded push keeps later trash and purge actions per-file. Reverified older
   schemas and unfinished baseline initialization through repeated pushes and
-  local or remote trash on 2026-10-09. Saved names and stars follow the page
-  when the original thread row is gone. Explicit project assignments also
-  follow the retained page when the original is absent, including when an
-  empty thread row holds trash scope. Reverified assignment persistence through
-  identity restoration, later syncs, and folder rules on 2026-10-06. Saved
-  parser-source project identities follow their page without overwriting the
-  original thread's identity. Archived pages whose files are absent keep their
-  messages, tool results, usage, and export identities under the page ID, even
-  if the original file is reparsed. Trashed archived pages move the same way,
-  retaining their saved names, stars, and pins; an empty thread row holds the
-  inherited trash scope. Reverified upgrade, restore, and rebuild with an
-  absent page on 2026-10-04. Their base cannot be recovered from disk, so they
-  link to the thread. Recall entries, evidence, extraction progress, and
-  conversation export identities and session state move to the page even when
-  its file was reparsed. The upgrade batches these ID mappings before joining
-  them to retained data. Later rebuilds keep metadata scoped to each file.
-  Activity hints still find the newest surviving page without an original
-  thread row. Reverified these archive and activity paths on 2026-10-02. Other
-  Codex versions may differ. Tests: `TestCodexRevertPageSessionsThroughAPI`,
-  `TestCodexRevertPagesFormATree`, `TestCodexRevertPagesRetainDailyUsage`,
+  local or remote trash on 2026-10-09. PostgreSQL purge and restore apply the
+  same owner and agent checks as inherited trash. New thread-wide exclusions
+  retain that identity. Pages with different recorded owners keep their own
+  trash and import state; old exclusions without ownership retain their original
+  global scope. Reverified purge, empty trash, restore, and later pushes
+  across two archives and legacy machine renames on 2026-10-09. Saved names
+  and stars follow the page when the original thread row is gone. Explicit
+  project assignments also follow the retained page when the original is
+  absent, including when an empty thread row holds trash scope. Reverified
+  assignment persistence through identity restoration, later syncs, and folder
+  rules on 2026-10-06. Saved parser-source project identities follow their
+  page without overwriting the original thread's identity. Archived pages
+  whose files are absent keep their messages, tool results, usage, and export
+  identities under the page ID, even if the original file is reparsed. Trashed
+  archived pages move the same way, retaining their saved names, stars, and
+  pins; an empty thread row holds the inherited trash scope. Reverified
+  upgrade, restore, and rebuild with an absent page on 2026-10-04. Their base
+  cannot be recovered from disk, so they link to the thread. Recall entries,
+  evidence, extraction progress, and conversation export identities and
+  session state move to the page even when its file was reparsed. The upgrade
+  batches these ID mappings before joining them to retained data. A Codex
+  rollout with no UUID in its filename still uses its file path to exclude a
+  stale parent-ID row after the fork is reparsed. Later rebuilds keep metadata
+  scoped to each file. Activity hints still find the newest surviving page
+  without an original thread row. Reverified these archive and activity paths
+  on 2026-10-02. Other Codex versions may differ. Tests:
+  `TestCodexRevertPageSessionsThroughAPI`, `TestCodexRevertPagesFormATree`,
+  `TestCodexRevertPagesRetainDailyUsage`,
   `TestCodexRevertPageUpgradeReplacesStaleThreadRow`,
   `TestCopySessionMetadataFrom_CodexPagePins`,
   `TestCodexPageUpgradePreservesPostgresPins`,
@@ -645,6 +653,8 @@ fixtures retain this field; missing identities remain source-local.
   `TestCodexPageUpgradeRetainsReparsedConversationIDs`,
   `TestCodexPageUpgradeRetainsColdConversationState`,
   `TestLegacyCodexTrashScopeSurvivesReturningPage`,
+  `TestCodexTrashScopeRespectsArchiveOwnership`,
+  `TestCodexForkUpgradeDoesNotRestoreReparsedParentIdentity`,
   `TestLegacyCodexTrashRestorePreservesArchivedPage`,
   `TestLiveActivityLookupFollowsNewestCodexRevertPage`,
   `TestCodexForkOfRevertedThreadDropsReplayedPageTurns`,

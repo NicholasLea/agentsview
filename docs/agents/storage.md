@@ -108,7 +108,10 @@ to thread-wide scope once; later deletions remain per-file. Pages pushed from
 the same source inherit a trashed PostgreSQL thread's scope until a member is
 restored or purged. PostgreSQL purge retains thread-wide exclusions for later
 pushes; the hosted legacy routes use the same behavior without removing raw
-projections.
+projections. Thread-wide restore, purge, and new exclusions use the same owner
+and agent checks as inherited trash. Old permanent exclusions that have no
+recorded owner retain their existing global scope. Exact-session exclusions
+remain unchanged.
 
 When an old PostgreSQL thread row held a revert page, the next push moves its
 remote pins and notes to that page before replacing the original thread. Both
