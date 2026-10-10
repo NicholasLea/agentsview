@@ -3276,7 +3276,7 @@ func remoteHostSyncFunc(
 			return stats, err
 		}
 		stats, err := httpRemoteCleanupRegistry.Run(runExclusive)
-		return stats.SessionsSynced, err
+		return stats.SessionsSynced + stats.TitlesUpdated, err
 	}
 }
 

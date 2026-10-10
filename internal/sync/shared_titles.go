@@ -319,17 +319,17 @@ func (e *Engine) antigravityTitleOwnsSource(databasePath, storedPath, machine st
 			return false
 		}
 	}
-	if remote {
-		bestRoot := ""
-		for _, candidate := range e.sources().agentDirs[parser.AgentAntigravity] {
-			clean := filepath.Clean(candidate)
-			if pathWithinRoot(physical, clean) && len(clean) > len(bestRoot) {
-				bestRoot = clean
-			}
+	// Both local and remote sources must prove they belong to the most specific
+	// configured root. A parent root cannot overwrite a child root's titles.
+	bestRoot := ""
+	for _, candidate := range e.sources().agentDirs[parser.AgentAntigravity] {
+		clean := filepath.Clean(candidate)
+		if pathWithinRoot(physical, clean) && len(clean) > len(bestRoot) {
+			bestRoot = clean
 		}
-		if bestRoot != filepath.Clean(root) {
-			return false
-		}
+	}
+	if bestRoot != filepath.Clean(root) {
+		return false
 	}
 	return filepath.IsAbs(physical) && pathWithinRoot(physical, root) &&
 		(machine == "" || machine == owner) &&
