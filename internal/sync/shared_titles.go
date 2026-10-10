@@ -87,13 +87,26 @@ func (e *Engine) sharedTitleDatabases() []parser.SharedTitleDatabase {
 // armed, and a read that failed earlier. A failed read keeps every stored name
 // and is retried on the next cycle; it never fails a body sync and never
 // fabricates a body parse retry.
+//
+// Deprecated: Use SyncSharedTitlesWithStatsContext for remote imports and
+// other callers that need to accumulate title counts. This method is retained
+// for local sweeps that only need the error outcome.
 func (e *Engine) SyncSharedTitlesContext(ctx context.Context) error {
+	_, err := e.SyncSharedTitlesWithStatsContext(ctx)
+	return err
+}
+
+// SyncSharedTitlesWithStatsContext refreshes titles and returns how many
+// session_name rows changed. It is the same as SyncSharedTitlesContext but
+// returns statistics for remote imports and other entry points that must
+// accumulate and report title-only changes.
+func (e *Engine) SyncSharedTitlesWithStatsContext(ctx context.Context) (SyncStats, error) {
+	var stats SyncStats
 	if e.refuseWriteInForceParse("SyncSharedTitles") {
-		return nil
+		return stats, nil
 	}
 	e.syncMu.Lock()
 	databases := e.sharedTitleDatabases()
-	var stats SyncStats
 	// Defers run LIFO: the lock is released before the emitter runs, so an
 	// Emitter implementation cannot widen the critical section.
 	defer func() {
@@ -105,7 +118,7 @@ func (e *Engine) SyncSharedTitlesContext(ctx context.Context) error {
 
 	updated, err := e.refreshSharedTitleDatabasesLocked(ctx, databases)
 	stats.RecordTitlesUpdated(updated)
-	return errors.Join(err, ctx.Err())
+	return stats, errors.Join(err, ctx.Err())
 }
 
 // refreshSharedTitleDatabasesLocked applies every planned database refresh and

@@ -268,6 +268,16 @@ func (pending *PreparedDeltaImport) Execute(
 		} else {
 			engineStats = engine.SyncAll(ctx, progress)
 		}
+		// After full scan, independently reconcile shared title databases.
+		// This catches title-only changes when transcripts are cached/unchanged.
+		if err := ctx.Err(); err == nil {
+			titleStats, titleErr := engine.SyncSharedTitlesWithStatsContext(ctx)
+			engineStats.TitlesUpdated += titleStats.TitlesUpdated
+			if titleErr != nil && engineStats.Synced == 0 {
+				// Propagate title-only errors when no transcripts were processed.
+				processErr = errors.Join(processErr, titleErr)
+			}
+		}
 	} else {
 		changedResult, processErr = engine.SyncChangedPathPlanWithOptionsContext(
 			ctx, pending.plan, syncpkg.ChangedPathSyncOptions{

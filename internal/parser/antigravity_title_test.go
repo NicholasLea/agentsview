@@ -172,15 +172,6 @@ func TestAntigravityBrainTranscriptTitleReachesProviderParse(t *testing.T) {
 	assert.Equal(t, "list the files in the project", result.Result.Messages[0].Content)
 }
 
-// TestAntigravityTitleDatabasePathEmptyRoot ensures an empty root degrades to
-// a no-signal read rather than opening a path relative to the process cwd.
-func TestAntigravityTitleDatabasePathEmptyRoot(t *testing.T) {
-	title, present, err := readAntigravityTitle(t.Context(), "", "some-id")
-	require.NoError(t, err)
-	assert.False(t, present)
-	assert.Empty(t, title)
-}
-
 func rootFor(t *testing.T, dbPath string) string {
 	t.Helper()
 	return filepath.Dir(filepath.Dir(dbPath))

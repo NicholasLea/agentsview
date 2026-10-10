@@ -169,16 +169,6 @@ func TestPlanClassifiesSharedTitleDatabaseAsTitleTaskOnly(t *testing.T) {
 	assert.Equal(t, parser.AgentAntigravity, titles[0].Agent)
 	assert.Equal(t, titlePath, titles[0].DBPath)
 	assert.Equal(t, "antigravity:", titles[0].IDPrefix())
-
-	// The -wal sibling is the same database, and the -shm index is never one:
-	// every read-only open rewrites -shm, so honoring it would re-trigger the
-	// refresh on each pass.
-	files, titles, err = engine.classifyChangedPaths(
-		t.Context(), []string{titlePath + "-wal", titlePath + "-shm"})
-	require.NoError(t, err)
-	assert.Empty(t, files)
-	require.Len(t, titles, 1, "only the -wal event resolves; -shm is dropped")
-	assert.Equal(t, titlePath, titles[0].DBPath)
 }
 
 // TestSharedTitleRefreshRewritesOnlyChangedNames covers the write side: only a

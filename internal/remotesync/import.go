@@ -59,6 +59,18 @@ func (im Importer) ImportExtracted(
 	stats.Failed = engineStats.Failed
 	stats.Deferred = engineStats.Deferred
 	stats.incomplete = !engineStats.ProcessingComplete()
+	if err := ctx.Err(); err != nil {
+		return stats, err
+	}
+	// After transcript sync, independently reconcile shared title databases.
+	// This catches title-only changes when transcripts are cached/unchanged.
+	titleStats, titleErr := engine.SyncSharedTitlesWithStatsContext(ctx)
+	stats.TitlesUpdated += titleStats.TitlesUpdated
+	if titleErr != nil && stats.SessionsSynced == 0 {
+		// Propagate title-only errors when no transcripts were processed,
+		// so failures are visible and journals remain for retry.
+		return stats, titleErr
+	}
 	if err := saveEngineSkipCache(ctx, im.DB, engine, layout.paths); err != nil {
 		return stats, err
 	}
