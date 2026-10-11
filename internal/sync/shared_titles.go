@@ -96,6 +96,12 @@ func (e *Engine) SyncSharedTitlesContext(ctx context.Context) (int, error) {
 	if e.refuseWriteInForceParse("SyncSharedTitles") {
 		return 0, nil
 	}
+	// An archive-only database never reads receiving-host sources, and a
+	// shared title store is one. The periodic sweep treats this as a no-op
+	// rather than a failure so it does not log on every cycle.
+	if e.sourceSyncErr != nil {
+		return 0, nil
+	}
 	e.syncMu.Lock()
 	databases := e.sharedTitleDatabases()
 	var stats SyncStats

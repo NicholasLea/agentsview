@@ -142,10 +142,11 @@ func duckAnalyticsToolMessageJoin(
 }
 
 func (s analyticsSQL) Autonomy(ctx context.Context, ids []string, _ db.AnalyticsFilter) (map[string]int, error) {
-	out := make(map[string]int)
-	err := db.QueryChunkedSize(ids, readbase.MaxSQLVars, func(chunk []string) error {
-		ph, args := db.InPlaceholders(chunk)
-		rows, err := s.QueryContext(ctx, `
+	if len(ids) == 0 {
+		return map[string]int{}, nil
+	}
+	ph, args := db.InPlaceholders(ids)
+	rows, err := s.QueryContext(ctx, `
 		SELECT session_id,
 			SUM(CASE WHEN role = 'user' AND is_system = FALSE
 				AND COALESCE(source_subtype, '') != 'tool_result' THEN 1 ELSE 0 END) AS user_count,
@@ -153,73 +154,53 @@ func (s analyticsSQL) Autonomy(ctx context.Context, ids []string, _ db.Analytics
 		FROM messages
 		WHERE session_id IN `+ph+`
 		GROUP BY session_id`,
-			args...,
-		)
-		if err != nil {
-			return fmt.Errorf("querying duckdb autonomy: %w", err)
-		}
-		defer rows.Close()
-		counts, err := readbase.ScanAnalyticsAutonomy(rows, "duckdb")
-		if err != nil {
-			return err
-		}
-		for bucket, count := range counts {
-			out[bucket] += count
-		}
-		return nil
-	})
+		args...,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("querying duckdb autonomy: %w", err)
 	}
-	return out, nil
+	defer rows.Close()
+	return readbase.ScanAnalyticsAutonomy(rows, "duckdb")
 }
 
 func (s analyticsSQL) VelocityMessages(ctx context.Context, ids []string, _ db.AnalyticsFilter, loc *time.Location) (map[string][]db.TimingMessage, error) {
 	out := make(map[string][]db.TimingMessage)
-	err := db.QueryChunkedSize(ids, readbase.MaxSQLVars, func(chunk []string) error {
-		ph, args := db.InPlaceholders(chunk)
-		rows, err := s.QueryContext(ctx, `
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph, args := db.InPlaceholders(ids)
+	rows, err := s.QueryContext(ctx, `
 		SELECT session_id, ordinal, role, timestamp, content_length
 		FROM messages
 		WHERE session_id IN `+ph+`
 		ORDER BY session_id, ordinal`,
-			args...,
-		)
-		if err != nil {
-			return fmt.Errorf("querying duckdb velocity messages: %w", err)
-		}
-		defer rows.Close()
-		_, err = readbase.ScanAnalyticsVelocityMessages(rows, "duckdb", formatDBTime, loc, out)
-		return err
-	})
+		args...,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("querying duckdb velocity messages: %w", err)
 	}
-	return out, nil
+	defer rows.Close()
+	return readbase.ScanAnalyticsVelocityMessages(rows, "duckdb", formatDBTime, loc, out)
 }
 
 func (s analyticsSQL) VelocityToolCounts(ctx context.Context, ids []string, _ db.AnalyticsFilter) (map[string]int, error) {
 	out := make(map[string]int)
-	err := db.QueryChunkedSize(ids, readbase.MaxSQLVars, func(chunk []string) error {
-		ph, args := db.InPlaceholders(chunk)
-		rows, err := s.QueryContext(ctx, `
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph, args := db.InPlaceholders(ids)
+	rows, err := s.QueryContext(ctx, `
 		SELECT session_id, COUNT(*)
 		FROM tool_calls
 		WHERE session_id IN `+ph+`
 		GROUP BY session_id`,
-			args...,
-		)
-		if err != nil {
-			return fmt.Errorf("querying duckdb velocity tool calls: %w", err)
-		}
-		defer rows.Close()
-		_, err = readbase.ScanAnalyticsVelocityToolCounts(rows, "duckdb", out)
-		return err
-	})
+		args...,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("querying duckdb velocity tool calls: %w", err)
 	}
-	return out, nil
+	defer rows.Close()
+	return readbase.ScanAnalyticsVelocityToolCounts(rows, "duckdb", out)
 }
 
 func (s *Store) duckPopulateFrustrationMarkers(
@@ -488,6 +469,7 @@ SELECT
 	0 AS user_message_count,
 	cu.is_headless AS is_automated,
 	'' AS display_name,
+	'' AS group_key, '' AS session_name,
 	NULL AS started_at,
 	cu.occurred_at AS activity_at
 FROM cursor_usage_events cu
@@ -564,6 +546,7 @@ func duckUsageRawSQL(f db.UsageFilter, sessionID string) (string, []any) {
 			s.project AS project, s.agent AS agent, s.machine AS machine,
 			s.user_message_count AS user_message_count, s.is_automated AS is_automated,
 			COALESCE(s.display_name, s.session_name, s.first_message, s.project, s.id) AS display_name,
+			s.group_key AS group_key, COALESCE(s.session_name, '') AS session_name,
 			s.started_at AS started_at,
 			COALESCE(s.ended_at, s.started_at, s.created_at) AS activity_at
 		FROM messages m
@@ -589,6 +572,7 @@ func duckUsageRawSQL(f db.UsageFilter, sessionID string) (string, []any) {
 			s.project AS project, s.agent AS agent, s.machine AS machine,
 			s.user_message_count AS user_message_count, s.is_automated AS is_automated,
 			COALESCE(s.display_name, s.session_name, s.first_message, s.project, s.id) AS display_name,
+			s.group_key AS group_key, COALESCE(s.session_name, '') AS session_name,
 			s.started_at AS started_at,
 			COALESCE(s.ended_at, s.started_at, s.created_at) AS activity_at
 		FROM usage_events ue
@@ -833,7 +817,7 @@ func duckUsageCTEFromRaw(
 				snapshot_rank, session_id, snapshot_attribution_session_id,
 				web_search_requests_norm, snapshot_web_search_requests,
 				project, agent, machine, user_message_count, is_automated,
-				display_name, started_at, activity_at
+				display_name, started_at, activity_at, group_key, session_name
 			),
 				ranked.snapshot_attribution_session_id AS session_id,
 				ranked.snapshot_web_search_requests AS web_search_requests_norm,
@@ -851,6 +835,8 @@ func duckUsageCTEFromRaw(
 					attributed.display_name, attributed.session_name,
 					attributed.first_message, attributed.project, attributed.id
 				) END AS display_name,
+				CASE WHEN attributed.id IS NULL THEN ranked.group_key ELSE attributed.group_key END AS group_key,
+				CASE WHEN attributed.id IS NULL THEN ranked.session_name ELSE COALESCE(attributed.session_name, '') END AS session_name,
 				CASE WHEN attributed.id IS NULL THEN ranked.started_at
 					ELSE attributed.started_at END AS started_at,
 				CASE WHEN attributed.id IS NULL THEN ranked.activity_at ELSE COALESCE(
@@ -997,6 +983,7 @@ type duckUsageAggregateRow struct {
 	authoritativeCost     int64
 	authoritativeCostRows int
 	snapshotDedupOutput   int
+	groupKey, sessionName string
 }
 
 type duckSessionUsageRow struct {
@@ -1668,7 +1655,7 @@ func (s *Store) forEachSessionUsageAggregateRow(
 	// after each row has been quantized to whole microdollars.
 	query := cte + `
 		SELECT session_id, project, agent, model, provider_id, price_model, source, message_ordinal, ts,
-			pricing_ts, display_name, started_at,
+			pricing_ts, display_name, started_at, group_key, session_name, machine,
 			input_tokens_norm AS input_tokens,
 			output_tokens_norm AS output_tokens,
 			snapshot_deduplicated_output_tokens,
@@ -1704,7 +1691,7 @@ func (s *Store) forEachSessionUsageAggregateRow(
 		if err := rows.Scan(
 			&r.sessionID, &r.project, &r.agent, &r.model, &r.providerID,
 			&r.priceModel, &r.source, &r.messageOrdinal, &ts, &pricingTS,
-			&r.displayName, &startedAt,
+			&r.displayName, &startedAt, &r.groupKey, &r.sessionName, &r.machine,
 			&r.inputTok, &r.outputTok, &r.snapshotDedupOutput,
 			&r.cacheCr, &r.cacheCr1h, &r.cacheRd,
 			&r.billableInput, &r.billableOutput, &r.billableReason,
@@ -1814,6 +1801,7 @@ func (s *Store) GetTopSessionsByCost(
 				a = &acc{row: db.TopSessionEntry{
 					SessionID: r.sessionID, DisplayName: r.displayName,
 					Agent: r.agent, Project: r.project, StartedAt: r.startedAt,
+					GroupKey: r.groupKey, SessionName: r.sessionName, Machine: r.machine,
 				}}
 				bySession[r.sessionID] = a
 			}
@@ -1858,6 +1846,9 @@ func (s *Store) GetTopSessionsByCost(
 			a.row.Cost = a.cost
 		}
 		out = append(out, a.row)
+	}
+	if f.TopSessionsByGroup {
+		return db.GroupTopSessions(out, limit, f.TopSessionsSort, f.TopSessionsTokenTypes)
 	}
 	return db.SortAndLimitTopSessions(
 		out, limit, f.TopSessionsSort, f.TopSessionsTokenTypes,

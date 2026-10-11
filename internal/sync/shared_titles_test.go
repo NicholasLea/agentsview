@@ -630,6 +630,32 @@ func TestSyncSharedTitlesIsRefusedOnReportOnlyEngine(t *testing.T) {
 	assert.Empty(t, emitter.take())
 }
 
+// TestSyncSharedTitlesIsANoOpOnArchiveOnlyDatabase keeps title refreshes out
+// of archive-only custody: source sync is disabled there, and a shared title
+// store is a receiving-host source, so stored names must stay as archived.
+func TestSyncSharedTitlesIsANoOpOnArchiveOnlyDatabase(t *testing.T) {
+	emitter := &sharedTitleScopeRecorder{}
+	root := t.TempDir()
+	database := openTestDB(t)
+	const id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	seedSharedTitleSession(t, database, "antigravity:"+id,
+		parser.AgentAntigravity, "archived name", root)
+	renamed := "must not be written"
+	writeConversationSummariesDB(t, root, map[string]*string{id: &renamed})
+	require.NoError(t, database.EnableArchiveOnly(t.Context()))
+
+	engine := NewEngine(t.Context(), database, EngineConfig{
+		AgentDirs: map[parser.AgentType][]string{parser.AgentAntigravity: {root}},
+		Machine:   "devbox",
+		Emitter:   emitter,
+	})
+	t.Cleanup(engine.Close)
+
+	requireSharedTitleSweep(t, engine, 0)
+	requireStoredTitle(t, database, "antigravity:"+id, "archived name")
+	assert.Empty(t, emitter.take())
+}
+
 // TestSyncSharedTitlesWithoutConfiguredRootsIsANoOp keeps the sweep cheap on a
 // machine with neither client: nothing to read, nothing written, no notify.
 func TestSyncSharedTitlesWithoutConfiguredRootsIsANoOp(t *testing.T) {
