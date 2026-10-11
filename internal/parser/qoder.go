@@ -358,7 +358,8 @@ func resolveQoderAppSQLitePath(sessionPath string, roots []string) string {
 		matchedRoot = cleanRoot
 		// The client directory is an ancestor of the root, not the root's last
 		// segment: default roots are <client>/projects.
-		isCN = QoderClientAppForPath(cleanRoot) == qoderCNClientApp
+		isCN = QoderClientAppForPath(cleanRoot) == qoderCNClientApp ||
+			QoderLocalClientAppForPath(cleanRoot) == qoderCNClientApp
 		break
 	}
 	if qoderAppDatabasePathOverride != nil {

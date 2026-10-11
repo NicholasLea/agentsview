@@ -273,3 +273,61 @@ func TestSharedTitleRefreshCountSurvivesUnchangedFilesInBatch(t *testing.T) {
 		})
 	}
 }
+
+// TestQoderTitleRefreshThroughSymlinkedNativeRoot covers native Qoder trees
+// linked outside the home directory: the client directory, its projects
+// directory, or the home directory itself. Configured roots are resolved to
+// their physical destination, so the refresh must still bind them to this
+// machine's application database, including a database event reported
+// through the physical path of a linked home.
+func TestQoderTitleRefreshThroughSymlinkedNativeRoot(t *testing.T) {
+	const id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	for _, position := range []string{"client directory", "projects directory", "home directory"} {
+		t.Run(position, func(t *testing.T) {
+			physical := filepath.Join(t.TempDir(), "physical")
+			require.NoError(t, os.MkdirAll(physical, 0o755))
+			home := t.TempDir()
+			link := filepath.Join(home, ".qoder")
+			switch position {
+			case "projects directory":
+				require.NoError(t, os.MkdirAll(link, 0o755))
+				link = filepath.Join(link, "projects")
+			case "home directory":
+				home = filepath.Join(t.TempDir(), "home")
+				link = home
+			}
+			if err := os.Symlink(physical, link); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			title := "linked native title"
+			dbPath := writeQoderSessionsDB(t, home, "com.qoder.app.stable", map[string]*string{id: &title})
+			root, _, err := parser.ResolveProviderRoot(parser.AgentQoder, filepath.Join(home, ".qoder", "projects"))
+			require.NoError(t, err)
+			require.NotEqual(t, filepath.Join(home, ".qoder", "projects"), root)
+			emitter := &sharedTitleScopeRecorder{}
+			database := openTestDB(t)
+			engine := NewEngine(t.Context(), database, EngineConfig{
+				AgentDirs: map[parser.AgentType][]string{parser.AgentQoder: {root}},
+				Machine:   "devbox", Emitter: emitter,
+			})
+			t.Cleanup(engine.Close)
+			source := filepath.Join(root, "work", id+".jsonl")
+			require.NoError(t, database.UpsertSession(t.Context(), db.Session{
+				ID: "qoder:" + id, Agent: string(parser.AgentQoder), Machine: "devbox",
+				FilePath: &source, SessionName: strPtr("old"),
+			}))
+
+			requireSharedTitleSweep(t, engine, 1)
+			requireStoredTitle(t, database, "qoder:"+id, title)
+			assert.Equal(t, []string{"sessions"}, emitter.take())
+
+			renamed := "renamed through event"
+			require.NoError(t, os.Remove(dbPath))
+			writeQoderSessionsDB(t, home, "com.qoder.app.stable", map[string]*string{id: &renamed})
+			event, err := filepath.EvalSymlinks(dbPath)
+			require.NoError(t, err)
+			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{event}))
+			requireStoredTitle(t, database, "qoder:"+id, renamed)
+		})
+	}
+}

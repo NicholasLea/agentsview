@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"go.kenn.io/agentsview/internal/pathutil"
 )
 
 // Shared title databases hold the human-facing conversation title that the
@@ -192,6 +194,11 @@ func QoderClientAppForPath(path string) string {
 
 // QoderLocalClientAppForPath binds only this user's native client tree.
 // A mirrored .qoder directory or a logical host:path is not a local owner.
+//
+// Configuration loading resolves transcript roots to their physical
+// destination, so the native tree is matched both as spelled under the home
+// directory and as resolved: a linked home, client directory, or projects
+// directory still binds the client that owns it.
 func QoderLocalClientAppForPath(path string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || !filepath.IsAbs(path) {
@@ -199,12 +206,24 @@ func QoderLocalClientAppForPath(path string) string {
 	}
 	clean := filepath.Clean(path)
 	for _, client := range qoderClientDirs {
-		root := filepath.Join(home, client.Dir)
-		if clean == root || strings.HasPrefix(clean, root+string(filepath.Separator)) {
-			return client.App
+		native := filepath.Join(home, client.Dir)
+		for _, root := range []string{native, resolvedLocalPath(native), resolvedLocalPath(filepath.Join(native, "projects"))} {
+			if root != "" && (clean == root || strings.HasPrefix(clean, root+string(filepath.Separator))) {
+				return client.App
+			}
 		}
 	}
 	return ""
+}
+
+// resolvedLocalPath returns path with symbolic links resolved the way
+// configured roots are, or "" when it cannot be resolved.
+func resolvedLocalPath(path string) string {
+	resolved, err := pathutil.ResolveAbsolute(path)
+	if err != nil {
+		return ""
+	}
+	return filepath.Clean(resolved)
 }
 
 // QoderTitleDatabaseForLocalSource returns the database of a verified native

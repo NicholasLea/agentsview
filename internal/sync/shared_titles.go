@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -298,7 +299,7 @@ func (e *Engine) sharedTitleForSession(ctx context.Context, database parser.Shar
 			return "", false, nil
 		}
 		expected := parser.QoderTitleDatabaseForLocalSource(sourcePath)
-		if filepath.Clean(database.DBPath) != expected {
+		if !sameLocalFile(database.DBPath, expected) {
 			return "", false, nil
 		}
 		title, present, err := parser.QoderSiblingJSONTitle(sourcePath)
@@ -349,4 +350,25 @@ func (e *Engine) antigravityTitleOwnsSource(databasePath, storedPath, machine st
 	return parser.AntigravityTitleDatabaseForSource(physical) == filepath.Clean(databasePath) &&
 		(machine == "" || machine == owner) &&
 		e.machineForPath(parser.AgentAntigravity, physical) == owner
+}
+
+// sameLocalFile reports whether two spellings name one existing file. A
+// watcher can report a database under a linked home through its physical path
+// while the native location is spelled under the home directory.
+func sameLocalFile(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	aInfo, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bInfo, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(aInfo, bInfo)
 }
