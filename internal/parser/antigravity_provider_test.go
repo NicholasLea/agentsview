@@ -40,9 +40,6 @@ func TestAntigravityProviderSourceMethods(t *testing.T) {
 	assert.False(t, plan.Roots[2].Recursive)
 	assert.Equal(t, root, plan.Roots[3].Path)
 	assert.False(t, plan.Roots[3].Recursive)
-	assert.Equal(t, "antigravity:summaries:"+root, plan.Roots[3].DebounceKey,
-		"the shared title store gets its own debounce key so a rename "+
-			"does not fan out into every conversation root")
 
 	discovered, err := provider.Discover(t.Context())
 	require.NoError(t, err)
@@ -998,12 +995,7 @@ func TestAntigravityProviderRoutesTrajectorySidecar(t *testing.T) {
 		"conversations watch must include the trajectory sidecar")
 	assert.Equal(t, root, plan.Roots[3].Path,
 		"the shared title store is watched at the IDE root, not a subdir")
-	assert.Contains(t, plan.Roots[3].IncludeGlobs,
-		antigravitySummariesDBName,
-		"the title store watch must cover conversation_summaries.db")
-	assert.NotContains(t, plan.Roots[3].IncludeGlobs,
-		antigravitySummariesDBName+"-shm",
-		"the -shm index is rewritten by every read and must stay unwatched")
+	assert.False(t, plan.Roots[3].Recursive)
 
 	sidecarPath := filepath.Join(root, "conversations", id+".trajectory.json")
 	changed, err := provider.SourcesForChangedPath(

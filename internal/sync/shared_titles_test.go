@@ -677,18 +677,26 @@ func TestSharedTitleDatabasesForRootsExistence(t *testing.T) {
 
 	assert.Empty(t, parser.SharedTitleDatabasesForRoots(
 		parser.AgentClaude, []string{root}))
-	assert.Empty(t, parser.SharedTitleDatabasesForRoots(
-		parser.AgentQoder, []string{root}),
-		"a root that is not a recognized Qoder client directory binds nothing")
 
-	// .qoderwork is a separate legacy export directory, so it must not be read
-	// as .qoder and bind this machine's application database. (The positive
-	// default-root case is pinned in the parser package, where no real
-	// application database needs to exist.)
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-	assert.Empty(t, parser.SharedTitleDatabasesForRoots(parser.AgentQoder,
-		[]string{filepath.Join(home, ".qoderwork", "projects")}))
+	// Qoder binds by root affinity. An isolated home holds a real application
+	// database, so a resolver that ignored the configured roots would
+	// enumerate it for the custom and .qoderwork roots too.
+	home := t.TempDir()
+	qoderDB := writeQoderSessionsDB(t, home, "com.qoder.app.stable", nil)
+	got = parser.SharedTitleDatabasesForRoots(parser.AgentQoder,
+		[]string{filepath.Join(home, ".qoder", "projects")})
+	require.Len(t, got, 1, "the native root binds its application database")
+	assert.Equal(t, qoderDB, got[0].DBPath)
+	assert.Equal(t, parser.AgentQoder, got[0].Agent)
+	for name, custom := range map[string]string{
+		"custom root":       root,
+		"mirrored .qoder":   filepath.Join(t.TempDir(), ".qoder", "projects"),
+		"legacy .qoderwork": filepath.Join(home, ".qoderwork", "projects"),
+	} {
+		assert.Empty(t, parser.SharedTitleDatabasesForRoots(
+			parser.AgentQoder, []string{custom}),
+			"%s must not bind this machine's application database", name)
+	}
 }
 
 // TestPlanSharedTitleTaskReachesExecution covers the two-phase contract end to

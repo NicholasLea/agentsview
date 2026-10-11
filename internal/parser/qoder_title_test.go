@@ -239,8 +239,9 @@ func TestQoderParseSubagentNeverAdoptsTitle(t *testing.T) {
 // segment of the root (<client>/projects), not the root's last segment, so a
 // last-segment match resolves every default root to no database at all.
 func TestResolveQoderAppSQLitePathBindsRoots(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	applicationSupport := filepath.Join(home, "Library", "Application Support")
 
 	for _, tt := range []struct {
@@ -298,8 +299,9 @@ func TestResolveQoderAppSQLitePathBindsRoots(t *testing.T) {
 // TestQoderTitleDatabasePathsForRootsDedupes keeps one watch root per
 // application directory even when several configured roots share a client.
 func TestQoderTitleDatabasePathsForRootsDedupes(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	intl := filepath.Join(home, ".qoder", "projects")
 	cn := filepath.Join(home, ".qoder-cn", "projects")
 	paths := qoderTitleDatabasePathsForRoots([]string{intl, intl, cn})
