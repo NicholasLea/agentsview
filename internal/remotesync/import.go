@@ -53,14 +53,13 @@ func (im Importer) ImportExtracted(
 		engineStats = engine.SyncAll(ctx, hostProgress(im.Host, im.Progress))
 	}
 	stats.SessionsSynced = engineStats.Synced
-	stats.TitlesUpdated = engineStats.TitlesUpdated
 	stats.SessionsTotal = engineStats.TotalSessions
 	stats.Skipped = engineStats.Skipped
 	stats.Failed = engineStats.Failed
 	stats.Deferred = engineStats.Deferred
 	stats.incomplete = !engineStats.ProcessingComplete()
 	titles, titleErr := engine.SyncSharedTitlesContext(ctx)
-	stats.TitlesUpdated += titles
+	stats.TitlesUpdated = titles
 	if err := saveEngineSkipCache(ctx, im.DB, engine, layout.paths); err != nil {
 		return stats, err
 	}

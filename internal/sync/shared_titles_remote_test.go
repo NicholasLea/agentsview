@@ -14,7 +14,7 @@ import (
 )
 
 func TestAntigravitySharedTitleRefreshOwnedRemoteSources(t *testing.T) {
-	for _, mode := range []string{"transport", "filesystem mirror", "wrong machine", "outside root", "nested foreign owner", "nested configured root", "missing resolver", "wrong mapping"} {
+	for _, mode := range []string{"transport", "filesystem mirror", "wrong machine", "outside root", "nested foreign owner", "nested configured root", "missing resolver", "wrong mapping", "unattributed remote row", "unconfigured root"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			const bare = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
@@ -58,6 +58,9 @@ func TestAntigravitySharedTitleRefreshOwnedRemoteSources(t *testing.T) {
 			if mode == "wrong machine" {
 				machine = "otherhost"
 			}
+			if mode == "unattributed remote row" {
+				machine = ""
+			}
 			if mode == "outside root" {
 				stored = "remote:/srv/elsewhere/transcript.jsonl"
 			}
@@ -67,11 +70,19 @@ func TestAntigravitySharedTitleRefreshOwnedRemoteSources(t *testing.T) {
 			if mode == "nested configured root" {
 				cfg.AgentDirs[parser.AgentAntigravity] = append(cfg.AgentDirs[parser.AgentAntigravity], nested)
 			}
+			if mode == "unconfigured root" {
+				// The event still plans the summaries database, but only a
+				// configured root may title transported sessions.
+				cfg.AgentDirs[parser.AgentAntigravity] = []string{t.TempDir()}
+			}
 			if mode == "missing resolver" {
 				cfg.StoredPathResolver = nil
 			}
 			if mode == "wrong mapping" {
-				cfg.StoredPathResolver = func(string) (string, bool) { return filepath.Join(root, "wrong.jsonl"), true }
+				// A valid transcript of another conversation in the same root:
+				// only the round trip back to the stored path rejects it.
+				other := filepath.Join(root, "brain", "11111111-2222-4333-8444-555555555555", ".system_generated", "logs", "transcript.jsonl")
+				cfg.StoredPathResolver = func(string) (string, bool) { return other, true }
 			}
 			display := "user override"
 			require.NoError(t, database.UpsertSession(t.Context(), db.Session{ID: fullID, Agent: string(parser.AgentAntigravity), Machine: machine, FilePath: &stored, SessionName: strPtr("old"), DisplayName: &display}))

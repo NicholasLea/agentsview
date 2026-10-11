@@ -389,8 +389,8 @@ Each session item shows:
   builds. Antigravity reads its local conversation summary database. On macOS,
   Qoder reads sibling session JSON first, then its own local application
   database. Missing or unreadable title sources keep the stored name; an
-  explicitly empty database title clears the native name. Startup catch-up
-  and a 60-second sweep recover missed changes. Manual AgentsView names still
+  explicitly empty database title clears the native name. Every local sync,
+  startup catch-up, and a 60-second sweep recover missed changes. Manual AgentsView names still
   take precedence. The first upgrade reparses existing sources to backfill
   titles; subsequent title-only refreshes do not rewrite messages or usage.
 - **Model name** — the AI model used for the session, shown when available

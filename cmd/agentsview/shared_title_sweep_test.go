@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/agentsview/internal/config"
 	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/dbtest"
 	"go.kenn.io/agentsview/internal/parser"
@@ -88,4 +89,48 @@ func TestStartSharedTitleSweepRunsImmediatelyAndStopsOnCancel(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		require.FailNow(t, "startSharedTitleSweep did not stop after cancellation")
 	}
+}
+
+// TestRunLocalSyncAppliesTitleOnlyRename drives the direct local sync command
+// path (AGENTSVIEW_NO_DAEMON=1 agentsview sync). A rename that only touches
+// the shared title database leaves the transcript unchanged, so the scan
+// skips it and the sync's title catch-up must apply the new name.
+func TestRunLocalSyncAppliesTitleOnlyRename(t *testing.T) {
+	dataDir := t.TempDir()
+	root := filepath.Join(dataDir, "antigravity")
+	const id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	const sessionID = "antigravity:" + id
+	dbtest.WriteTestFile(t,
+		filepath.Join(root, "brain", id, ".system_generated", "logs", "transcript.jsonl"),
+		[]byte(`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"unchanged body"}`+"\n"))
+	titlePath := parser.AntigravityTitleDatabasePath(root)
+	writeSharedTitleDatabaseFixture(t, titlePath, id, "first title")
+	cfg := config.Config{
+		DataDir:        dataDir,
+		DBPath:         filepath.Join(dataDir, "sessions.db"),
+		InstallationID: "devbox",
+		AgentDirs:      map[parser.AgentType][]string{parser.AgentAntigravity: {root}},
+	}
+	database, err := db.Open(t.Context(), cfg.DBPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+
+	var stats sync.SyncStats
+	captureStdout(t, func() {
+		_, stats, err = runLocalSyncResult(t.Context(), cfg, database, false)
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Synced)
+
+	writeSharedTitleDatabaseFixture(t, titlePath, id, "renamed title")
+	captureStdout(t, func() {
+		_, stats, err = runLocalSyncResult(t.Context(), cfg, database, false)
+	})
+	require.NoError(t, err)
+	assert.Zero(t, stats.Synced, "the unchanged transcript must be skipped")
+	assert.Equal(t, 1, stats.TitlesUpdated)
+	name, found, err := database.GetSessionName(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "renamed title", name)
 }

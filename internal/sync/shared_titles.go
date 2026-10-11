@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/parser"
 )
 
@@ -57,15 +59,13 @@ func (e *Engine) isConfiguredSharedTitleSHMPath(path string) bool {
 // configured roots, across the providers that have one. It is recomputed on
 // each sweep so a database that appears later -- a client installed after the
 // watcher was armed, or a store deleted and recreated -- is picked up without
-// waiting for a filesystem event.
+// waiting for a filesystem event. Disabled providers are filtered by
+// refreshSharedTitleDatabasesLocked, which also guards planned event tasks.
 func (e *Engine) sharedTitleDatabases() []parser.SharedTitleDatabase {
 	var databases []parser.SharedTitleDatabase
 	for _, agent := range []parser.AgentType{
 		parser.AgentAntigravity, parser.AgentQoder,
 	} {
-		if slices.Contains(e.sources().preserveAgents, agent) {
-			continue
-		}
 		roots := e.sources().agentDirs[agent]
 		if len(roots) == 0 {
 			continue
@@ -119,6 +119,25 @@ func (e *Engine) SyncSharedTitlesContext(ctx context.Context) (int, error) {
 	return updated, errors.Join(err, ctx.Err())
 }
 
+// reconcileSharedTitlesLocked is the title catch-up of an ordinary local sync.
+// A title-only rename leaves every transcript unchanged, so the scan skips
+// them all and only this pass can apply the new name. The caller must hold
+// syncMu and has already applied the force-parse refusal. Disabled providers
+// are skipped by the refresh itself, and an archive-only engine configures no
+// roots. A read failure keeps the stored names and is logged; the next sync or
+// sweep retries it. Remote importers skip this pass and call
+// SyncSharedTitlesContext after their scan, so a failure retries the import.
+func (e *Engine) reconcileSharedTitlesLocked(ctx context.Context, stats *SyncStats) {
+	if e.pathRewriter != nil || e.idPrefix != "" || ctx.Err() != nil {
+		return
+	}
+	updated, err := e.refreshSharedTitleDatabasesLocked(ctx, e.sharedTitleDatabases())
+	stats.RecordTitlesUpdated(updated)
+	if err != nil && ctx.Err() == nil {
+		log.Printf("sync: shared title refresh: %v", err)
+	}
+}
+
 // refreshSharedTitleDatabasesLocked applies every planned database refresh and
 // returns how many session_name rows actually changed. The caller must hold
 // syncMu: it writes the archive database and compares against rows a
@@ -168,9 +187,6 @@ func (e *Engine) applySharedTitleRecords(
 	records []parser.SharedTitleRecord,
 ) (int, error) {
 	prefix := database.IDPrefix()
-	if prefix == "" {
-		return 0, nil
-	}
 	updated := 0
 	var errs error
 	seenRecord := make(map[string]struct{}, len(records))
@@ -233,7 +249,14 @@ func (e *Engine) applySharedTitleRecords(
 				errs = errors.Join(errs, err)
 				continue
 			}
-			if !present || title == current {
+			if !present {
+				continue
+			}
+			// Stored names are sanitized on every write path, so compare and
+			// write the sanitized value; a raw control byte would otherwise
+			// rewrite the same displayed name on every sweep.
+			title = db.SanitizeUTF8(title)
+			if title == current {
 				continue
 			}
 			var value *string
@@ -266,13 +289,16 @@ func (e *Engine) sharedTitleForSession(ctx context.Context, database parser.Shar
 			return "", false, nil
 		}
 	case parser.AgentQoder:
-		// Application Support belongs to this machine, even when transported
-		// source paths happen to resemble native local paths.
-		if e.pathRewriter != nil || e.idPrefix != "" || !filepath.IsAbs(sourcePath) || (machine != "" && machine != e.machine) {
+		// Application Support belongs to this machine, so both the stored
+		// attribution and the root's current machine label must name it: a
+		// native root relabeled to another machine keeps its older rows'
+		// local attribution. Remote engines never reach here; the refresh
+		// loop skips Qoder for them before reading the database.
+		if (machine != "" && machine != e.machine) || e.machineForPath(parser.AgentQoder, sourcePath) != e.machine {
 			return "", false, nil
 		}
 		expected := parser.QoderTitleDatabaseForLocalSource(sourcePath)
-		if expected == "" || filepath.Clean(database.DBPath) != expected {
+		if filepath.Clean(database.DBPath) != expected {
 			return "", false, nil
 		}
 		title, present, err := parser.QoderSiblingJSONTitle(sourcePath)
@@ -320,8 +346,7 @@ func (e *Engine) antigravityTitleOwnsSource(databasePath, storedPath, machine st
 			return false
 		}
 	}
-	return filepath.IsAbs(physical) &&
-		parser.AntigravityTitleDatabaseForSource(physical) == filepath.Clean(databasePath) &&
+	return parser.AntigravityTitleDatabaseForSource(physical) == filepath.Clean(databasePath) &&
 		(machine == "" || machine == owner) &&
 		e.machineForPath(parser.AgentAntigravity, physical) == owner
 }

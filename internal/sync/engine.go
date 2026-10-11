@@ -4516,6 +4516,7 @@ func (e *Engine) syncThenRunLocked(
 			syncWriteDefault, true, false,
 		)
 	}
+	e.reconcileSharedTitlesLocked(ctx, &stats)
 	if ctx.Err() != nil {
 		return stats, ctx.Err()
 	}
@@ -4652,6 +4653,7 @@ func (e *Engine) SyncThenRunWithRebuild(
 			syncWriteDefault, true, false,
 		)
 	}
+	e.reconcileSharedTitlesLocked(ctx, &stats)
 	if err := ctx.Err(); err != nil {
 		return stats, err
 	}
@@ -5061,6 +5063,7 @@ func (e *Engine) syncAll(
 		ctx, onProgress, time.Time{}, nil, syncWriteDefault, true,
 		forceFullParse && !allowCachedFailures,
 	)
+	e.reconcileSharedTitlesLocked(ctx, &stats)
 	return
 }
 

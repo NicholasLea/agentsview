@@ -454,4 +454,8 @@ func TestWorkerResultHasSessionChangesSeesMetadataOnlyStats(t *testing.T) {
 	linksOnly := workerResult{Stats: &sync.SyncStats{LinksUpdated: 1}}
 	assert.True(t, workerResultHasSessionChanges(linksOnly),
 		"a link-only audit pass must still notify SSE clients")
+
+	titlesOnly := workerResult{Stats: &sync.SyncStats{TitlesUpdated: 1}}
+	assert.True(t, workerResultHasSessionChanges(titlesOnly),
+		"a title-only pass must still notify SSE clients")
 }

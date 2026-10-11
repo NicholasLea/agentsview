@@ -2,7 +2,6 @@ package sync
 
 import (
 	"database/sql"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -424,61 +423,54 @@ func TestSharedTitleRefreshRespectsSourceOwnership(t *testing.T) {
 // TestAntigravityNestedLocalRootsKeepTheirOwnTitles pins IDE-root ownership
 // for local sources. With one Antigravity root nested inside another, both
 // summaries databases can hold the same conversation ID; only the database of
-// the root that holds the transcript may title it. Root order and directory
-// names vary so the sweep visits the ancestor database both before and after
-// the child's.
+// the root that holds the transcript may title it. Databases are refreshed in
+// path order, so the child directory names place the ancestor database both
+// before and after the child's.
 func TestAntigravityNestedLocalRootsKeepTheirOwnTitles(t *testing.T) {
 	const id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 	for _, childName := range []string{"a-child", "z-child"} {
-		for _, parentFirst := range []bool{true, false} {
-			for _, layout := range []string{"session database", "brain transcript"} {
-				name := fmt.Sprintf("%s/parent first %t/%s", childName, parentFirst, layout)
-				t.Run(name, func(t *testing.T) {
-					parent := t.TempDir()
-					child := filepath.Join(parent, childName)
-					roots := []string{parent, child}
-					if !parentFirst {
-						roots = []string{child, parent}
-					}
-					emitter := &sharedTitleScopeRecorder{}
-					engine, database := sharedTitleTestEngineForDirs(t, emitter,
-						map[parser.AgentType][]string{parser.AgentAntigravity: roots})
-					source := filepath.Join(child, "conversations", id+".db")
-					if layout == "brain transcript" {
-						source = filepath.Join(child, "brain", id,
-							".system_generated", "logs", "transcript.jsonl")
-					}
-					seedSharedTitleSessionAt(t, database, "antigravity:"+id,
-						parser.AgentAntigravity, "stale", source)
+		for _, layout := range []string{"session database", "brain transcript"} {
+			t.Run(childName+"/"+layout, func(t *testing.T) {
+				parent := t.TempDir()
+				child := filepath.Join(parent, childName)
+				emitter := &sharedTitleScopeRecorder{}
+				engine, database := sharedTitleTestEngineForDirs(t, emitter,
+					map[parser.AgentType][]string{parser.AgentAntigravity: {parent, child}})
+				source := filepath.Join(child, "conversations", id+".db")
+				if layout == "brain transcript" {
+					source = filepath.Join(child, "brain", id,
+						".system_generated", "logs", "transcript.jsonl")
+				}
+				seedSharedTitleSessionAt(t, database, "antigravity:"+id,
+					parser.AgentAntigravity, "stale", source)
 
-					ancestorTitle := "ancestor title"
-					childTitle := "child title"
-					parentDB := writeConversationSummariesDB(t, parent,
-						map[string]*string{id: &ancestorTitle})
-					childDB := writeConversationSummariesDB(t, child,
-						map[string]*string{id: &childTitle})
+				ancestorTitle := "ancestor title"
+				childTitle := "child title"
+				parentDB := writeConversationSummariesDB(t, parent,
+					map[string]*string{id: &ancestorTitle})
+				childDB := writeConversationSummariesDB(t, child,
+					map[string]*string{id: &childTitle})
 
-					requireSharedTitleSweep(t, engine, 1)
-					requireStoredTitle(t, database, "antigravity:"+id, childTitle)
-					assert.Equal(t, []string{"sessions"}, emitter.take())
+				requireSharedTitleSweep(t, engine, 1)
+				requireStoredTitle(t, database, "antigravity:"+id, childTitle)
+				assert.Equal(t, []string{"sessions"}, emitter.take())
 
-					requireSharedTitleSweep(t, engine, 0)
-					requireStoredTitle(t, database, "antigravity:"+id, childTitle)
-					assert.Empty(t, emitter.take(), "a steady state must not notify again")
+				requireSharedTitleSweep(t, engine, 0)
+				requireStoredTitle(t, database, "antigravity:"+id, childTitle)
+				assert.Empty(t, emitter.take(), "a steady state must not notify again")
 
-					require.NoError(t, engine.SyncPathsContext(t.Context(), []string{parentDB}))
-					requireStoredTitle(t, database, "antigravity:"+id, childTitle)
-					assert.Empty(t, emitter.take(),
-						"an ancestor database event must not retitle the child's session")
+				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{parentDB}))
+				requireStoredTitle(t, database, "antigravity:"+id, childTitle)
+				assert.Empty(t, emitter.take(),
+					"an ancestor database event must not retitle the child's session")
 
-					require.NoError(t, os.Remove(childDB))
-					blank := ""
-					writeConversationSummariesDB(t, child, map[string]*string{id: &blank})
-					requireSharedTitleSweep(t, engine, 1)
-					requireStoredTitle(t, database, "antigravity:"+id, "")
-					assert.Equal(t, []string{"sessions"}, emitter.take())
-				})
-			}
+				require.NoError(t, os.Remove(childDB))
+				blank := ""
+				writeConversationSummariesDB(t, child, map[string]*string{id: &blank})
+				requireSharedTitleSweep(t, engine, 1)
+				requireStoredTitle(t, database, "antigravity:"+id, "")
+				assert.Equal(t, []string{"sessions"}, emitter.take())
+			})
 		}
 	}
 }
@@ -652,6 +644,7 @@ func TestSyncSharedTitlesIsANoOpOnArchiveOnlyDatabase(t *testing.T) {
 	t.Cleanup(engine.Close)
 
 	requireSharedTitleSweep(t, engine, 0)
+	engine.SyncAll(t.Context(), nil)
 	requireStoredTitle(t, database, "antigravity:"+id, "archived name")
 	assert.Empty(t, emitter.take())
 }
