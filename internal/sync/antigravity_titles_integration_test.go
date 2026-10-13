@@ -146,3 +146,20 @@ func TestAntigravityRebuildKeepsRenamesOfSessionsWithoutTranscript(t *testing.T)
 	engine.ResyncAll(t.Context(), nil)
 	assert.Equal(t, new("Later"), antigravityStoredTitle(t, archive), "orphan copies must not restore an older title")
 }
+
+func TestAntigravityTrashedSessionRestoresWithCurrentTitle(t *testing.T) {
+	root := t.TempDir()
+	transcript := writeAntigravityTitleTranscript(t, root, "hello")
+	store := setAntigravityTitle(t, root, "First")
+	archive := dbtest.OpenTestDB(t)
+	engine := newAntigravityTitleEngine(t, archive, root)
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	id := "antigravity:" + antigravityTitleID
+
+	require.NoError(t, archive.SoftDeleteSession(t.Context(), id))
+	setAntigravityTitle(t, root, "Renamed in trash")
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
+	_, err := archive.RestoreSession(t.Context(), id)
+	require.NoError(t, err)
+	assert.Equal(t, new("Renamed in trash"), antigravityStoredTitle(t, archive))
+}

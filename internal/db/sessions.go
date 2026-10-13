@@ -2548,13 +2548,17 @@ func (db *DB) BumpLocalModifiedAt(ctx context.Context, id string) error {
 // full UpsertSession is unsafe because the caller does not have a complete
 // row to avoid overwriting existing fields with zero values.
 func (db *DB) RefreshSessionName(ctx context.Context, id string, sessionName *string) error {
-	_, err := db.RefreshActiveSessionName(ctx, id, sessionName)
-	return err
+	return db.refreshSessionName(ctx, id, sessionName, false)
 }
 
-// RefreshActiveSessionName is RefreshSessionName that reports whether an
-// active row changed; a trashed or missing session reports false.
-func (db *DB) RefreshActiveSessionName(ctx context.Context, id string, sessionName *string) (bool, error) {
+// RefreshNativeSessionName is RefreshSessionName for a title owned by the
+// agent's own store. It also updates trashed rows so a restore shows the
+// agent's current title.
+func (db *DB) RefreshNativeSessionName(ctx context.Context, id string, sessionName *string) error {
+	return db.refreshSessionName(ctx, id, sessionName, true)
+}
+
+func (db *DB) refreshSessionName(ctx context.Context, id string, sessionName *string, includeTrashed bool) error {
 	if db.usageOnlyStorage() {
 		sessionName = nil
 	}
@@ -2569,29 +2573,25 @@ func (db *DB) RefreshActiveSessionName(ctx context.Context, id string, sessionNa
 	defer db.mu.Unlock()
 	tx, err := db.getWriter().Begin(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		`UPDATE sessions
 		 SET session_name = ?,
 		     local_modified_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ? AND deleted_at IS NULL`,
-		sessionName, id,
+		 WHERE id = ? AND (? OR deleted_at IS NULL)`,
+		sessionName, id, includeTrashed,
 	)
 	if err != nil {
-		return false, err
-	}
-	changed, err := res.RowsAffected()
-	if err != nil {
-		return false, err
+		return err
 	}
 	if db.usageOnlyStorage() {
 		if err := clearUsageOnlyTextTx(tx, id); err != nil {
-			return false, err
+			return err
 		}
 	}
-	return changed > 0, tx.Commit()
+	return tx.Commit()
 }
 
 // FindSessionIDsByPartial returns up to limit session IDs that contain the
@@ -4227,7 +4227,6 @@ type SessionWriteIdentity struct {
 	FilePath    string
 	FileHash    string
 	SessionName *string
-	Deleted     bool
 }
 
 // ListSessionWriteIdentitiesByID returns stored source attribution and parser
@@ -4266,7 +4265,7 @@ func (db *DB) ListSessionWriteIdentitiesByID(
 			rows, err := db.getReader().QueryContext(ctx, `
 			SELECT id, machine, agent,
 			       COALESCE(file_path, ''), COALESCE(file_hash, ''),
-			       session_name, deleted_at IS NOT NULL
+			       session_name
 			FROM sessions
 			WHERE id IN (`+placeholders+`)
 			ORDER BY id`, args...)
@@ -4280,7 +4279,6 @@ func (db *DB) ListSessionWriteIdentitiesByID(
 				if err := rows.Scan(
 					&id, &identity.Machine, &identity.Agent,
 					&identity.FilePath, &identity.FileHash, &identity.SessionName,
-					&identity.Deleted,
 				); err != nil {
 					_ = rows.Close()
 					return fmt.Errorf(

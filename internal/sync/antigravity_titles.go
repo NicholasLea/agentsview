@@ -37,14 +37,10 @@ func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, force boo
 		if prior, seen := e.antigravityTitleStates[store]; seen && !force && prior == state {
 			continue
 		}
-		n, trashedStale, err := e.applyAntigravityStoreTitles(ctx, root, store)
+		n, err := e.applyAntigravityStoreTitles(ctx, root, store)
 		updated += n
 		if err != nil {
 			log.Printf("antigravity titles %s: %v", store, err)
-			continue
-		}
-		// A trashed session can be restored without a store change; keep rereading.
-		if trashedStale {
 			continue
 		}
 		if e.antigravityTitleStates == nil {
@@ -55,10 +51,10 @@ func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, force boo
 	return updated
 }
 
-func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root, store string) (updated int, trashedStale bool, err error) {
+func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root, store string) (updated int, err error) {
 	titles, err := parser.AntigravityStoreTitles(ctx, store, true)
 	if err != nil || len(titles) == 0 {
-		return 0, false, err
+		return 0, err
 	}
 	prefix := e.idPrefix + string(parser.AgentAntigravity) + ":"
 	ids := make([]string, 0, len(titles))
@@ -68,7 +64,7 @@ func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root, store st
 	slices.Sort(ids)
 	stored, err := e.db.ListSessionWriteIdentitiesByID(ctx, ids)
 	if err != nil {
-		return 0, false, err
+		return 0, err
 	}
 	for _, id := range ids {
 		session, ok := stored[id]
@@ -83,26 +79,17 @@ func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root, store st
 		if !e.antigravityRootOwns(root, session.FilePath) {
 			continue
 		}
-		if session.Deleted {
-			trashedStale = true
-			continue
-		}
 		var name *string
 		if title != "" {
 			name = &title
 		}
-		changed, err := e.db.RefreshActiveSessionName(ctx, id, name)
-		if err != nil {
-			return updated, false, err
-		}
-		if !changed {
-			// Trashed after the lookup; retry so a restore still gets the title.
-			trashedStale = true
-			continue
+		// Trashed sessions take the title too, so restoring one needs no store change.
+		if err := e.db.RefreshNativeSessionName(ctx, id, name); err != nil {
+			return updated, err
 		}
 		updated++
 	}
-	return updated, trashedStale, nil
+	return updated, nil
 }
 
 // antigravityRootOwns keeps a store from renaming a same-ID session that
