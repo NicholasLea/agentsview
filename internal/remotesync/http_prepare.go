@@ -2,9 +2,11 @@ package remotesync
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/parser"
 	syncpkg "go.kenn.io/agentsview/internal/sync"
+	"go.kenn.io/kit/atomicfile"
 )
 
 var (
@@ -437,6 +440,12 @@ func (p *PreparedHTTP) ImportActive(ctx context.Context) (SyncStats, error) {
 		return stats, ctxErr
 	}
 	retireStart := time.Now()
+	if err := p.persistAntigravityTitleStates(); err != nil {
+		stats.JournalOutcome = JournalCachePersistFailed
+		p.mirrorImport.outcome = stats.JournalOutcome
+		p.reportDeltaImport(stats)
+		return stats, err
+	}
 	if err := p.retireJournal(p.mirrorImport.journalPath); err != nil {
 		stats.RetirementDuration = time.Since(retireStart)
 		stats.JournalOutcome = JournalRetirementFailed
@@ -537,6 +546,7 @@ func (p *PreparedHTTP) RebuildContributor(ctx context.Context) (syncpkg.RebuildC
 		); err != nil {
 			return &rebuildCachePersistError{err: err}
 		}
+		p.mirrorImport.pending.antigravityTitleStates = engine.SnapshotAntigravityTitleStates()
 		return nil
 	}
 	forceParse := p.sync.forceParseRequested()
@@ -601,6 +611,9 @@ func (p *PreparedHTTP) Commit() error {
 		return errors.New("prepared HTTP journal is not ready to commit")
 	}
 	start := time.Now()
+	if err := p.persistAntigravityTitleStates(); err != nil {
+		return err
+	}
 	if err := p.retireJournal(p.mirrorImport.journalPath); err != nil {
 		p.mirrorImport.pending.Stats.RetirementDuration = time.Since(start)
 		p.mirrorImport.outcome = JournalRetirementFailed
@@ -980,9 +993,14 @@ func (hs HTTPSync) prepareMirror(
 	}
 	hasPending := journal.FullImport || journal.RequiredDataVersion != 0 ||
 		len(journal.Entries) > 0 || fullReason != "" || hs.Full
-	// Antigravity titles need backfill even when the mirror has no changed paths.
-	if !mutatesMirror && !hasPending && len(prepared.targets.Dirs[parser.AgentAntigravity]) == 0 {
-		return nil, nil
+	if !mutatesMirror && !hasPending {
+		pendingTitles, err := prepared.antigravityTitlesPending()
+		if err != nil {
+			return nil, err
+		}
+		if !pendingTitles {
+			return nil, nil
+		}
 	}
 	if err := prepared.replaceJournal(journalPath, journal); err != nil {
 		return nil, fmt.Errorf("persist pending mirror changes: %w", err)
@@ -1066,6 +1084,49 @@ func (hs HTTPSync) prepareMirror(
 		mergeStats: mergeStats, fullReason: fullReason,
 		outcome: JournalAbortedBeforeProcessing, pending: pending,
 	}, nil
+}
+
+func (p *PreparedHTTP) antigravityTitlesPending() (bool, error) {
+	if len(p.targets.Dirs[parser.AgentAntigravity]) == 0 || p.sync.DB.ArchiveContent().UsageOnly() {
+		return false, nil
+	}
+	current := make(map[string]parser.SQLiteContainerState)
+	for _, remoteRoot := range p.targets.Dirs[parser.AgentAntigravity] {
+		root, err := safeRemappedRemotePath(p.root, remoteRoot)
+		if err != nil {
+			return false, err
+		}
+		store := filepath.Join(root, parser.AntigravitySummariesDBName)
+		if state, ok := parser.StatSQLiteContainerState(store); ok {
+			current[store] = state
+		}
+	}
+	data, err := os.ReadFile(p.root + ".antigravity-titles.json")
+	if errors.Is(err, os.ErrNotExist) {
+		return len(current) > 0, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read applied Antigravity title states: %w", err)
+	}
+	var applied map[string]parser.SQLiteContainerState
+	if err := json.Unmarshal(data, &applied); err != nil {
+		return false, fmt.Errorf("decode applied Antigravity title states: %w", err)
+	}
+	return !maps.Equal(current, applied), nil
+}
+
+func (p *PreparedHTTP) persistAntigravityTitleStates() error {
+	if len(p.targets.Dirs[parser.AgentAntigravity]) == 0 || p.sync.DB.ArchiveContent().UsageOnly() {
+		return nil
+	}
+	data, err := json.Marshal(p.mirrorImport.pending.antigravityTitleStates)
+	if err != nil {
+		return err
+	}
+	if err := atomicfile.WriteFile(p.root+".antigravity-titles.json", data, atomicfile.WithPrivate()); err != nil {
+		return fmt.Errorf("persist applied Antigravity title states: %w", err)
+	}
+	return nil
 }
 
 func requireMirrorDataVersionImport(

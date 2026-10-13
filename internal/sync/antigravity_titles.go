@@ -12,14 +12,8 @@ import (
 	"go.kenn.io/agentsview/internal/parser"
 )
 
-// reconcileAntigravityTitlesLocked copies titles from each Antigravity root's
-// title store onto its stored sessions. A rename never touches the transcript,
-// so this covers renames, sessions whose transcript is gone, and sessions
-// imported before titles were read. Unchanged stores are skipped unless force
-// is set; an unreadable store keeps stored titles and is retried next pass.
-// The caller holds syncMu and runs this after the pass's parse writes, so a
-// parse that read an older title cannot overwrite a newer one.
-func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, force bool) int {
+// The caller holds syncMu and reconciles after parsing so an older parsed title cannot win.
+func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context) int {
 	sources := e.sources()
 	if _, enabled := sources.providerFactories[parser.AgentAntigravity]; !enabled ||
 		e.db.ArchiveContent().UsageOnly() {
@@ -35,7 +29,7 @@ func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, force boo
 		if !ok {
 			continue
 		}
-		if prior, seen := e.antigravityTitleStates[store]; seen && !force && prior == state {
+		if prior, seen := e.antigravityTitleStates[store]; seen && prior == state {
 			continue
 		}
 		n, err := e.applyAntigravityStoreTitles(ctx, root, store)
@@ -50,6 +44,13 @@ func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, force boo
 		e.antigravityTitleStates[store] = state
 	}
 	return updated
+}
+
+// SnapshotAntigravityTitleStates lets remote mirrors record only successfully applied stores.
+func (e *Engine) SnapshotAntigravityTitleStates() map[string]parser.SQLiteContainerState {
+	e.syncMu.Lock()
+	defer e.syncMu.Unlock()
+	return maps.Clone(e.antigravityTitleStates)
 }
 
 func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root, store string) (updated int, err error) {
@@ -80,10 +81,10 @@ func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root, store st
 		if !ok {
 			session, deferred = archived[id]
 		}
-		if !ok && !deferred || session.Agent != string(parser.AgentAntigravity) {
+		if !ok && !deferred {
 			continue
 		}
-		title := titles[strings.TrimPrefix(id, prefix)]
+		title := db.SanitizeUTF8(titles[strings.TrimPrefix(id, prefix)])
 		if session.SessionName != nil && *session.SessionName == title ||
 			session.SessionName == nil && title == "" {
 			continue

@@ -38,6 +38,9 @@ func TestAntigravityProviderSourceMethods(t *testing.T) {
 		"the plaintext transcript directory stays watched")
 	assert.Equal(t, filepath.Join(root, "conversations"), plan.Roots[2].Path)
 	assert.False(t, plan.Roots[2].Recursive)
+	assert.Equal(t, root, plan.Roots[3].Path)
+	assert.False(t, plan.Roots[3].Recursive)
+	assert.Equal(t, []string{"conversation_summaries.db", "conversation_summaries.db-wal"}, plan.Roots[3].IncludeGlobs)
 
 	discovered, err := provider.Discover(t.Context())
 	require.NoError(t, err)
@@ -987,7 +990,7 @@ func TestAntigravityProviderRoutesTrajectorySidecar(t *testing.T) {
 
 	plan, err := provider.WatchPlan(t.Context())
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(plan.Roots), 3)
+	require.Len(t, plan.Roots, 4)
 	assert.Equal(t, filepath.Join(root, "conversations"), plan.Roots[2].Path)
 	assert.Contains(t, plan.Roots[2].IncludeGlobs, "*.trajectory.json",
 		"conversations watch must include the trajectory sidecar")

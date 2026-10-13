@@ -77,6 +77,8 @@ type PreparedDeltaImport struct {
 	progress            syncpkg.ProgressFunc
 	save                func(*db.DB, *syncpkg.Engine, remotePathMap) error
 	apply               func(context.Context, string, []string, map[string]int64) error
+
+	antigravityTitleStates map[string]parser.SQLiteContainerState
 }
 
 func (im Importer) PreparePending(
@@ -351,6 +353,7 @@ func (pending *PreparedDeltaImport) Execute(
 			break
 		}
 		stats.JournalOutcome = JournalRetired
+		pending.antigravityTitleStates = engine.SnapshotAntigravityTitleStates()
 	}
 	pending.Stats = stats
 	return stats, processErr

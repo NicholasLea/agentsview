@@ -1823,7 +1823,7 @@ func (e *Engine) syncChangedPathsLocked(
 		ctx, e.prepareChangedPathSync(ctx, paths),
 	)
 	// Title store events carry no session files, so this also handles them.
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, false)
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx)
 	return stats, tombstoned, err
 }
 
@@ -5725,7 +5725,7 @@ func (e *Engine) reconcileWatchRootsStreamedLocked(
 		}
 	}
 	// Recovery passes also catch title store events the watcher missed.
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, fullCoverage || force)
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx)
 	canTombstoneCompletedScopes :=
 		retErr == nil && (failures > 0 || stats.Deferred > 0) &&
 			stats.Failed == 0 && !stats.Aborted
@@ -8275,8 +8275,7 @@ func (e *Engine) syncAllLocked(
 	} else {
 		stats.RecordLinksUpdated(linked)
 	}
-	// A full pass rereads every title store in case a write kept its state.
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, since.IsZero())
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx)
 
 	e.reportFinalizingProgress(
 		onProgress, writeMode, finalizingSkipCacheDetail,

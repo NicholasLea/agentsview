@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/agentsview/internal/config"
 	"go.kenn.io/agentsview/internal/db"
+	"go.kenn.io/agentsview/internal/dbtest"
 	"go.kenn.io/agentsview/internal/parser"
 	syncpkg "go.kenn.io/agentsview/internal/sync"
 	"go.kenn.io/agentsview/internal/testjsonl"
@@ -1125,26 +1126,17 @@ func TestHTTPMirrorJournalRetiresAfterActiveImport(t *testing.T) {
 func TestHTTPUnchangedMirrorBackfillsAntigravityTitles(t *testing.T) {
 	remote := newMirrorTestRemote(t)
 	remote.targets.Dirs = map[parser.AgentType][]string{parser.AgentAntigravity: {remote.dir}}
-	const conversationID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	transcript := filepath.Join(remote.dir, "brain", conversationID, ".system_generated", "logs", "transcript.jsonl")
-	require.NoError(t, os.MkdirAll(filepath.Dir(transcript), 0o755))
-	require.NoError(t, os.WriteFile(transcript, []byte(`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"hello"}`+"\n"), 0o644))
-	store, err := sql.Open("sqlite3", filepath.Join(remote.dir, parser.AntigravitySummariesDBName))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	_, err = store.Exec(`CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT)`)
-	require.NoError(t, err)
-	_, err = store.Exec(`INSERT INTO conversation_summaries VALUES (?, ?)`, conversationID, "Saved title")
-	require.NoError(t, err)
-	require.NoError(t, store.Close())
+	dbtest.WriteAntigravityTitleTranscript(t, remote.dir, "hello")
+	dbtest.SetAntigravityTitle(t, remote.dir, "Saved title")
 
 	database, hs := newMirrorSync(t, remote, t.TempDir())
 	first, err := hs.Run(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, first.SessionsSynced)
-	const sessionID = "devbox~antigravity:" + conversationID
+	const sessionID = "devbox~antigravity:" + dbtest.AntigravityTitleID
 	// Older imports kept the title store in the mirror but left sessions untitled.
 	require.NoError(t, database.RefreshNativeSessionName(t.Context(), sessionID, nil))
+	require.NoError(t, os.Remove(MirrorDir(hs.DataDir, hs.Host)+".antigravity-titles.json"))
 	before, err := database.GetSessionFull(t.Context(), sessionID)
 	require.NoError(t, err)
 	require.NotNil(t, before)
@@ -1176,6 +1168,31 @@ func TestHTTPUnchangedMirrorBackfillsAntigravityTitles(t *testing.T) {
 	messagesAfter, err := database.GetMessages(t.Context(), sessionID, 0, 10, true)
 	require.NoError(t, err)
 	assert.Equal(t, messagesBefore, messagesAfter)
+	journalWrites := 0
+	hs.runPrepare = func(ctx context.Context) (*PreparedHTTP, error) {
+		return hs.prepare(ctx, func(prepared *PreparedHTTP) {
+			replace := prepared.replaceJournal
+			prepared.replaceJournal = func(path string, journal MirrorChangeJournal) error {
+				journalWrites++
+				return replace(path, journal)
+			}
+		})
+	}
+	third, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, SyncStats{}, third)
+	assert.Zero(t, journalWrites)
+	assert.Len(t, remote.archiveRequests, requests)
+
+	dbtest.SetAntigravityTitle(t, remote.dir, "Later title")
+	fourth, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 1, fourth.SessionsSynced)
+	after, err = database.GetSessionFull(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, after)
+	assert.Equal(t, new("Later title"), after.SessionName)
+	assert.Equal(t, before.TranscriptRevision, after.TranscriptRevision)
 }
 
 func TestHTTPUnchangedMirrorImportsIntoNewDatabaseGeneration(t *testing.T) {

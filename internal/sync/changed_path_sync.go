@@ -114,7 +114,7 @@ func (e *Engine) SyncChangedPathPlanWithOptionsContext(
 	if len(files) == 0 {
 		// A title store change alone plans no session files.
 		e.syncMu.Lock()
-		result.Stats.TitlesUpdated = e.reconcileAntigravityTitlesLocked(ctx, false)
+		result.Stats.TitlesUpdated = e.reconcileAntigravityTitlesLocked(ctx)
 		e.syncMu.Unlock()
 		if result.Stats.TitlesUpdated > 0 {
 			e.emit("sessions")
@@ -193,7 +193,7 @@ func (e *Engine) SyncChangedPathPlanWithOptionsContext(
 	if !e.ephemeral {
 		e.persistSkipCache(ctx)
 	}
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, false)
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx)
 	e.mu.Lock()
 	e.lastSync = time.Now()
 	e.lastSyncStats = stats

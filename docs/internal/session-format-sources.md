@@ -3622,7 +3622,8 @@ schemas keep their existing ordering behavior.
   stay out of the transcript fingerprint: parsing copies the saved title, and
   each sync pass copies changed titles onto stored sessions, including those
   whose transcript is gone. A NULL title or unreadable store keeps the stored
-  title; a blank title clears it.
+  title; a blank title clears it. Rechecked 2026-10-13 with synthetic stores:
+  missing tables or columns return an error and preserve archived titles.
 
 ## Antigravity CLI (`antigravity-cli`)
 
