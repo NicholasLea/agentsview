@@ -19,11 +19,13 @@ import (
 // The caller holds syncMu and runs this after the pass's parse writes, so a
 // parse that read an older title cannot overwrite a newer one.
 func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, force bool) int {
-	if e.db.ArchiveContent().UsageOnly() {
+	sources := e.sources()
+	if _, enabled := sources.providerFactories[parser.AgentAntigravity]; !enabled ||
+		e.db.ArchiveContent().UsageOnly() {
 		return 0
 	}
 	updated := 0
-	for _, root := range e.sources().agentDirs[parser.AgentAntigravity] {
+	for _, root := range sources.agentDirs[parser.AgentAntigravity] {
 		if ctx.Err() != nil {
 			return updated
 		}

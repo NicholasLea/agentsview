@@ -2953,6 +2953,8 @@ func (e *Engine) resyncAllWithOptionsLocked(
 		return stats, err
 	}
 	ops = ops.withDefaults()
+	// Title states applied to the replacement do not describe a discarded build.
+	defer func() { e.antigravityTitleStates = nil }()
 
 	// Hold the write barrier for the whole in-process build-and-swap window. The
 	// build reads the original while it stays open, and the swap's
@@ -4204,6 +4206,8 @@ func (e *Engine) SwapResyncDatabase(
 // the next sync, never persisted). The caller invokes it immediately after a
 // successful SwapResyncDatabase.
 func (e *Engine) ResetCachesAfterSwap(ctx context.Context) error {
+	// Orphan copies can carry titles older than the stores' applied states.
+	e.antigravityTitleStates = nil
 	e.clearTrustedSQLiteContainers()
 	e.clearTrustedOpenCodeStorageSessions()
 	e.clearVerifiedSources()

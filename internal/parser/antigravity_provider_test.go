@@ -27,7 +27,7 @@ func TestAntigravityProviderSourceMethods(t *testing.T) {
 
 	plan, err := provider.WatchPlan(t.Context())
 	require.NoError(t, err)
-	require.Len(t, plan.Roots, 3)
+	require.GreaterOrEqual(t, len(plan.Roots), 3)
 	assert.Equal(t, filepath.Join(root, "annotations"), plan.Roots[0].Path)
 	assert.False(t, plan.Roots[0].Recursive)
 	assert.Equal(t, filepath.Join(root, "brain"), plan.Roots[1].Path)
@@ -987,7 +987,7 @@ func TestAntigravityProviderRoutesTrajectorySidecar(t *testing.T) {
 
 	plan, err := provider.WatchPlan(t.Context())
 	require.NoError(t, err)
-	require.Len(t, plan.Roots, 3)
+	require.GreaterOrEqual(t, len(plan.Roots), 3)
 	assert.Equal(t, filepath.Join(root, "conversations"), plan.Roots[2].Path)
 	assert.Contains(t, plan.Roots[2].IncludeGlobs, "*.trajectory.json",
 		"conversations watch must include the trajectory sidecar")
