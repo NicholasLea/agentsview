@@ -3614,6 +3614,16 @@ schemas keep their existing ordering behavior.
   roots share that ID. An unreadable database still reports an error instead
   of replacing archived content with a potentially incomplete transcript.
 
+- **Title evidence:** [antigravity-cli#1042](https://github.com/google-antigravity/antigravity-cli/issues/1042)
+  records `conversation_summaries.db` under `~/.gemini/antigravity/` and
+  `~/.gemini/antigravity-ide/`. The [contributor confirmed Antigravity 2.22.0 on macOS](https://github.com/kenn-io/agentsview/pull/2190#issuecomment-6120251760)
+  uses `~/.gemini/antigravity/conversation_summaries.db` with
+  `conversation_summaries(conversation_id PRIMARY KEY, title, ...)`. Titles
+  stay out of the transcript fingerprint: parsing copies the saved title, and
+  each sync pass copies changed titles onto stored sessions, including those
+  whose transcript is gone. A NULL title or unreadable store keeps the stored
+  title; a blank title clears it.
+
 ## Antigravity CLI (`antigravity-cli`)
 
 - **Format:** Newer per-session SQLite databases or older encrypted protobuf

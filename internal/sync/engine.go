@@ -655,6 +655,9 @@ type Engine struct {
 	completeSourceMirror    bool
 	emitter                 Emitter
 	providerMigrationModes  map[parser.AgentType]parser.ProviderMigrationMode
+	// antigravityTitleStates records each title store's state at its last
+	// applied read. Guarded by syncMu.
+	antigravityTitleStates map[string]parser.SQLiteContainerState
 
 	providerWatchRootsMu    gosync.Mutex
 	providerWatchRoots      map[parser.AgentType][]parser.WatchRoot
@@ -1813,9 +1816,12 @@ func (e *Engine) syncChangedPathsLocked(
 	})
 	ctx = parser.WithProjectRootMemo(ctx)
 	ctx = parser.WithCodexParentInventoryBatch(ctx)
-	return e.applyChangedPathSyncLocked(
+	stats, tombstoned, err := e.applyChangedPathSyncLocked(
 		ctx, e.prepareChangedPathSync(ctx, paths),
 	)
+	// Title store events carry no session files, so this also handles them.
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, false)
+	return stats, tombstoned, err
 }
 
 func (e *Engine) applyChangedPathSyncLocked(
@@ -5702,6 +5708,8 @@ func (e *Engine) reconcileWatchRootsStreamedLocked(
 			stats.RecordLinksUpdated(repaired)
 		}
 	}
+	// Recovery passes also catch title store events the watcher missed.
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, false)
 	canTombstoneCompletedScopes :=
 		retErr == nil && (failures > 0 || stats.Deferred > 0) &&
 			stats.Failed == 0 && !stats.Aborted
@@ -7009,6 +7017,7 @@ func mergeReconciliationSyncStats(dst *SyncStats, src SyncStats) {
 	dst.cwdFilteredSessions += src.cwdFilteredSessions
 	dst.cwdFilteredFiles += src.cwdFilteredFiles
 	dst.CwdUpdated += src.CwdUpdated
+	dst.TitlesUpdated += src.TitlesUpdated
 	dst.LinksUpdated += src.LinksUpdated
 	dst.Aborted = dst.Aborted || src.Aborted
 	if !dst.deferredRetryOverflow {
@@ -8250,6 +8259,8 @@ func (e *Engine) syncAllLocked(
 	} else {
 		stats.RecordLinksUpdated(linked)
 	}
+	// A full pass rereads every title store in case a write kept its state.
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, since.IsZero())
 
 	e.reportFinalizingProgress(
 		onProgress, writeMode, finalizingSkipCacheDetail,
@@ -17647,11 +17658,9 @@ func (e *Engine) normalizePendingWriteMachines(
 				batch[i].sess.Machine = stored.Machine
 				// A rebuild writes into a fresh database, so the upsert cannot
 				// preserve a title from the destination row. Carry the archived
-				// nullable title into index-less Codex parses; an explicitly
+				// nullable title into parses with no title signal; an explicitly
 				// present blank remains authoritative and bypasses this path.
-				if e.archiveStore != nil &&
-					batch[i].sess.Agent == parser.AgentCodex &&
-					!batch[i].sess.SessionNamePresent {
+				if e.archiveStore != nil && parser.PreservesStoredSessionName(batch[i].sess) {
 					batch[i].sess.SessionName = ""
 					if stored.SessionName != nil {
 						batch[i].sess.SessionName = *stored.SessionName

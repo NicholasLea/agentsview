@@ -1457,9 +1457,9 @@ type ParsedSession struct {
 	FirstMessage            string
 	SessionName             string
 	// SessionNamePresent distinguishes an explicitly present provider title
-	// (including a blank title) from no title signal. Codex needs this because
-	// current releases may omit session_index.jsonl entirely, while an older
-	// index entry with a blank thread_name explicitly clears a stored title.
+	// (including a blank title) from no title signal. Codex and Antigravity
+	// keep titles outside the transcript, so a missing or unreadable title
+	// source keeps the stored title while an explicit blank clears it.
 	SessionNamePresent bool
 	StartedAt          time.Time
 	EndedAt            time.Time
