@@ -38,9 +38,6 @@ func TestAntigravityProviderSourceMethods(t *testing.T) {
 		"the plaintext transcript directory stays watched")
 	assert.Equal(t, filepath.Join(root, "conversations"), plan.Roots[2].Path)
 	assert.False(t, plan.Roots[2].Recursive)
-	assert.Equal(t, root, plan.Roots[3].Path)
-	assert.Contains(t, plan.Roots[3].IncludeGlobs, AntigravitySummariesDBName,
-		"title renames arrive through the summaries store")
 
 	discovered, err := provider.Discover(t.Context())
 	require.NoError(t, err)

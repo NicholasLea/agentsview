@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/parser"
 )
 
@@ -66,9 +67,20 @@ func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root, store st
 	if err != nil {
 		return 0, err
 	}
+	var archived map[string]db.SessionWriteIdentity
+	if reader, ok := e.archiveStore.(sessionWriteIdentityReader); ok && e.deferredAntigravityTitles != nil {
+		// A rebuild copies archived sessions without sources only after this pass.
+		if archived, err = reader.ListSessionWriteIdentitiesByID(ctx, ids); err != nil {
+			return 0, err
+		}
+	}
 	for _, id := range ids {
 		session, ok := stored[id]
-		if !ok || session.Agent != string(parser.AgentAntigravity) {
+		deferred := false
+		if !ok {
+			session, deferred = archived[id]
+		}
+		if !ok && !deferred || session.Agent != string(parser.AgentAntigravity) {
 			continue
 		}
 		title := titles[strings.TrimPrefix(id, prefix)]
@@ -82,6 +94,10 @@ func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root, store st
 		var name *string
 		if title != "" {
 			name = &title
+		}
+		if deferred {
+			e.deferredAntigravityTitles[id] = name
+			continue
 		}
 		// Trashed sessions take the title too, so restoring one needs no store change.
 		if err := e.db.RefreshNativeSessionName(ctx, id, name); err != nil {

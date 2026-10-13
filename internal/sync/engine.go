@@ -576,6 +576,9 @@ type Engine struct {
 	sourceClaimsMu    gosync.Mutex
 	sourceClaims      map[string]string
 	deferredSourceCwd *sourceCwdReconciliationBatch
+	// deferredAntigravityTitles holds rebuild title changes for archived
+	// sessions that reach the replacement only through the orphan copy.
+	deferredAntigravityTitles map[string]*string
 	// sourceSet holds the provider set and session roots this engine
 	// discovers from. ReconfigureSources replaces it as one snapshot.
 	sourceSet atomic.Pointer[engineSources]
@@ -3391,6 +3394,9 @@ func (e *Engine) resyncBuildLocked(
 	deferredSourceCwd := newSourceCwdReconciliationBatch()
 	e.deferredSourceCwd = deferredSourceCwd
 	defer func() { e.deferredSourceCwd = nil }()
+	deferredTitles := make(map[string]*string)
+	e.deferredAntigravityTitles = deferredTitles
+	defer func() { e.deferredAntigravityTitles = nil }()
 	e.db = newDB
 	reportResyncPhase(
 		PhaseDiscovering,
@@ -3439,6 +3445,7 @@ func (e *Engine) resyncBuildLocked(
 		contributorEngine.archiveStore = origDB
 		contributorEngine.archiveRebuildIndex = archiveIndex
 		contributorEngine.deferredSourceCwd = deferredSourceCwd
+		contributorEngine.deferredAntigravityTitles = deferredTitles
 		contributorEngine.forceFullParse = contributor.ForceParse ||
 			contributor.ForceFullParseAfterCache
 		contributorEngine.forceFullParseAllowsCache =
@@ -3702,6 +3709,11 @@ func (e *Engine) resyncBuildLocked(
 	}
 	stats.OrphanedCopied = len(orphaned)
 	copiedSessionIDs = append(copiedSessionIDs, orphaned...)
+	for id, name := range deferredTitles {
+		if err := newDB.RefreshNativeSessionName(ctx, id, name); err != nil {
+			log.Printf("resync: apply deferred antigravity title: %v", err)
+		}
+	}
 	deferredCwdUpdated, err := e.applyDeferredSourceCwd(ctx,
 		newDB, deferredSourceCwd,
 	)
@@ -4208,7 +4220,6 @@ func (e *Engine) SwapResyncDatabase(
 func (e *Engine) ResetCachesAfterSwap(ctx context.Context) error {
 	// Orphan copies can carry titles older than the stores' applied states.
 	e.antigravityTitleStates = nil
-	e.reconcileAntigravityTitlesLocked(ctx, true)
 	e.clearTrustedSQLiteContainers()
 	e.clearTrustedOpenCodeStorageSessions()
 	e.clearVerifiedSources()
