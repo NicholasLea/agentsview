@@ -27,7 +27,7 @@ func TestAntigravityProviderSourceMethods(t *testing.T) {
 
 	plan, err := provider.WatchPlan(t.Context())
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(plan.Roots), 3)
+	require.Len(t, plan.Roots, 4)
 	assert.Equal(t, filepath.Join(root, "annotations"), plan.Roots[0].Path)
 	assert.False(t, plan.Roots[0].Recursive)
 	assert.Equal(t, filepath.Join(root, "brain"), plan.Roots[1].Path)
@@ -38,6 +38,9 @@ func TestAntigravityProviderSourceMethods(t *testing.T) {
 		"the plaintext transcript directory stays watched")
 	assert.Equal(t, filepath.Join(root, "conversations"), plan.Roots[2].Path)
 	assert.False(t, plan.Roots[2].Recursive)
+	assert.Equal(t, root, plan.Roots[3].Path)
+	assert.Contains(t, plan.Roots[3].IncludeGlobs, AntigravitySummariesDBName,
+		"title renames arrive through the summaries store")
 
 	discovered, err := provider.Discover(t.Context())
 	require.NoError(t, err)

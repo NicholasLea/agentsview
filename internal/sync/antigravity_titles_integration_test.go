@@ -129,3 +129,20 @@ func TestAntigravityTitleStoreRenamesOnlyItsOwnSessions(t *testing.T) {
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
 	assert.Equal(t, new("Owner title"), antigravityStoredTitle(t, archive))
 }
+
+func TestAntigravityRebuildKeepsRenamesOfSessionsWithoutTranscript(t *testing.T) {
+	root := t.TempDir()
+	transcript := writeAntigravityTitleTranscript(t, root, "hello")
+	setAntigravityTitle(t, root, "First")
+	archive := dbtest.OpenTestDB(t)
+	engine := newAntigravityTitleEngine(t, archive, root)
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+
+	require.NoError(t, os.RemoveAll(filepath.Join(root, "brain")))
+	// A rebuild with no live sources refuses to swap.
+	dbtest.WriteTestFile(t, filepath.Join(root, "brain", "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", ".system_generated", "logs", "transcript.jsonl"),
+		[]byte(`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"live"}`+"\n"))
+	setAntigravityTitle(t, root, "Later")
+	engine.ResyncAll(t.Context(), nil)
+	assert.Equal(t, new("Later"), antigravityStoredTitle(t, archive), "orphan copies must not restore an older title")
+}

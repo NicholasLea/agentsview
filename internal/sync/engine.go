@@ -4208,6 +4208,7 @@ func (e *Engine) SwapResyncDatabase(
 func (e *Engine) ResetCachesAfterSwap(ctx context.Context) error {
 	// Orphan copies can carry titles older than the stores' applied states.
 	e.antigravityTitleStates = nil
+	e.reconcileAntigravityTitlesLocked(ctx, true)
 	e.clearTrustedSQLiteContainers()
 	e.clearTrustedOpenCodeStorageSessions()
 	e.clearVerifiedSources()
@@ -5713,7 +5714,7 @@ func (e *Engine) reconcileWatchRootsStreamedLocked(
 		}
 	}
 	// Recovery passes also catch title store events the watcher missed.
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, false)
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, fullCoverage || force)
 	canTombstoneCompletedScopes :=
 		retErr == nil && (failures > 0 || stats.Deferred > 0) &&
 			stats.Failed == 0 && !stats.Aborted
