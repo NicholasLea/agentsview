@@ -39,6 +39,10 @@ func AntigravityStoreTitles(ctx context.Context, path string, fresh bool) (map[s
 		return nil, ctx.Err()
 	}
 	if ok {
+		// Remote imports extract stores into fresh temp roots; bound what stays cached.
+		if _, cached := antigravityTitleCache.stores[path]; !cached && len(antigravityTitleCache.stores) >= 16 {
+			clear(antigravityTitleCache.stores)
+		}
 		antigravityTitleCache.stores[path] = antigravityTitleSnapshot{state: state, titles: titles, err: err}
 	} else {
 		delete(antigravityTitleCache.stores, path)
