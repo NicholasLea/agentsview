@@ -980,7 +980,8 @@ func (hs HTTPSync) prepareMirror(
 	}
 	hasPending := journal.FullImport || journal.RequiredDataVersion != 0 ||
 		len(journal.Entries) > 0 || fullReason != "" || hs.Full
-	if !mutatesMirror && !hasPending {
+	// Antigravity titles need backfill even when the mirror has no changed paths.
+	if !mutatesMirror && !hasPending && len(prepared.targets.Dirs[parser.AgentAntigravity]) == 0 {
 		return nil, nil
 	}
 	if err := prepared.replaceJournal(journalPath, journal); err != nil {

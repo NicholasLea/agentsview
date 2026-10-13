@@ -1122,6 +1122,62 @@ func TestHTTPMirrorJournalRetiresAfterActiveImport(t *testing.T) {
 	assert.NoFileExists(t, journalPath)
 }
 
+func TestHTTPUnchangedMirrorBackfillsAntigravityTitles(t *testing.T) {
+	remote := newMirrorTestRemote(t)
+	remote.targets.Dirs = map[parser.AgentType][]string{parser.AgentAntigravity: {remote.dir}}
+	const conversationID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	transcript := filepath.Join(remote.dir, "brain", conversationID, ".system_generated", "logs", "transcript.jsonl")
+	require.NoError(t, os.MkdirAll(filepath.Dir(transcript), 0o755))
+	require.NoError(t, os.WriteFile(transcript, []byte(`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"hello"}`+"\n"), 0o644))
+	store, err := sql.Open("sqlite3", filepath.Join(remote.dir, parser.AntigravitySummariesDBName))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	_, err = store.Exec(`CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT)`)
+	require.NoError(t, err)
+	_, err = store.Exec(`INSERT INTO conversation_summaries VALUES (?, ?)`, conversationID, "Saved title")
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+
+	database, hs := newMirrorSync(t, remote, t.TempDir())
+	first, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, first.SessionsSynced)
+	const sessionID = "devbox~antigravity:" + conversationID
+	// Older imports kept the title store in the mirror but left sessions untitled.
+	require.NoError(t, database.RefreshNativeSessionName(t.Context(), sessionID, nil))
+	before, err := database.GetSessionFull(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, before)
+	require.Nil(t, before.SessionName)
+	version, err := database.RemoteImportDataVersion(t.Context(), hs.Host)
+	require.NoError(t, err)
+	require.Equal(t, db.CurrentDataVersion(), version)
+	messagesBefore, err := database.GetMessages(t.Context(), sessionID, 0, 10, true)
+	require.NoError(t, err)
+	require.Len(t, messagesBefore, 1)
+	requests := len(remote.archiveRequests)
+
+	second, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 1, second.SessionsSynced)
+	assert.Empty(t, second.FullReason)
+	assert.Zero(t, second.FilesDiscovered)
+	assert.Zero(t, second.FilesProcessed)
+	assert.Len(t, remote.archiveRequests, requests)
+	after, err := database.GetSessionFull(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, after)
+	assert.Equal(t, new("Saved title"), after.SessionName)
+	assert.Equal(t, before.FileHash, after.FileHash)
+	assert.Equal(t, before.FileSize, after.FileSize)
+	assert.Equal(t, before.FileMtime, after.FileMtime)
+	assert.Equal(t, before.DataVersion, after.DataVersion)
+	assert.Equal(t, before.TranscriptRevision, after.TranscriptRevision)
+	messagesAfter, err := database.GetMessages(t.Context(), sessionID, 0, 10, true)
+	require.NoError(t, err)
+	assert.Equal(t, messagesBefore, messagesAfter)
+}
+
 func TestHTTPUnchangedMirrorImportsIntoNewDatabaseGeneration(t *testing.T) {
 	remote := newMirrorTestRemote(t)
 	remote.writeSession(t, "session.jsonl",
