@@ -91,8 +91,14 @@ func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root, store st
 		if title != "" {
 			name = &title
 		}
-		if err := e.db.RefreshSessionName(ctx, id, name); err != nil {
+		changed, err := e.db.RefreshActiveSessionName(ctx, id, name)
+		if err != nil {
 			return updated, false, err
+		}
+		if !changed {
+			// Trashed after the lookup; retry so a restore still gets the title.
+			trashedStale = true
+			continue
 		}
 		updated++
 	}

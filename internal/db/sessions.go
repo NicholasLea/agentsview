@@ -2548,6 +2548,13 @@ func (db *DB) BumpLocalModifiedAt(ctx context.Context, id string) error {
 // full UpsertSession is unsafe because the caller does not have a complete
 // row to avoid overwriting existing fields with zero values.
 func (db *DB) RefreshSessionName(ctx context.Context, id string, sessionName *string) error {
+	_, err := db.RefreshActiveSessionName(ctx, id, sessionName)
+	return err
+}
+
+// RefreshActiveSessionName is RefreshSessionName that reports whether an
+// active row changed; a trashed or missing session reports false.
+func (db *DB) RefreshActiveSessionName(ctx context.Context, id string, sessionName *string) (bool, error) {
 	if db.usageOnlyStorage() {
 		sessionName = nil
 	}
@@ -2562,10 +2569,10 @@ func (db *DB) RefreshSessionName(ctx context.Context, id string, sessionName *st
 	defer db.mu.Unlock()
 	tx, err := db.getWriter().Begin(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`UPDATE sessions
 		 SET session_name = ?,
 		     local_modified_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -2573,14 +2580,18 @@ func (db *DB) RefreshSessionName(ctx context.Context, id string, sessionName *st
 		sessionName, id,
 	)
 	if err != nil {
-		return err
+		return false, err
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return false, err
 	}
 	if db.usageOnlyStorage() {
 		if err := clearUsageOnlyTextTx(tx, id); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return tx.Commit()
+	return changed > 0, tx.Commit()
 }
 
 // FindSessionIDsByPartial returns up to limit session IDs that contain the
