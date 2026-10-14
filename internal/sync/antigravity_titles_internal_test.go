@@ -49,72 +49,129 @@ func TestAntigravityUnrelatedChangedPathSkipsUnchangedStoreQueries(t *testing.T)
 	assert.Len(t, spy.queries, 1)
 }
 
+func TestAntigravityFramelessWALEventsDoNotRereadStore(t *testing.T) {
+	root := t.TempDir()
+	transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
+	store := dbtest.SetAntigravityTitle(t, root, "First")
+	archive := openTestDB(t)
+	engine := NewEngine(t.Context(), archive, EngineConfig{AgentDirs: map[parser.AgentType][]string{parser.AgentAntigravity: {root}}, Machine: "host-a"})
+	t.Cleanup(engine.Close)
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	spy := &antigravityTitleQuerySpy{Store: archive, reader: archive}
+	engine.archiveStore = spy
+	engine.deferredAntigravityTitles = make(map[string]*string)
+	for _, size := range []int{0, 32} {
+		require.NoError(t, os.WriteFile(store+"-wal", make([]byte, size), 0o600))
+		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store + "-wal"}))
+		require.NoError(t, os.Remove(store+"-wal"))
+		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store + "-wal"}))
+		plan, err := engine.PlanChangedPathsContext(t.Context(), []string{store + "-wal"})
+		require.NoError(t, err)
+		_, err = engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
+		require.NoError(t, err)
+	}
+	assert.Empty(t, spy.queries, "reader-created WAL events must not reread titles")
+}
+
 func TestAntigravityTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
-	for _, mode := range []string{"watcher", "plan", "recovery", "grouped"} {
+	for _, mode := range []string{"watcher", "watcher-read", "plan", "recovery", "grouped"} {
 		t.Run(mode, func(t *testing.T) {
-			root, claudeRoot := t.TempDir(), t.TempDir()
-			transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
-			store := dbtest.SetAntigravityTitle(t, root, "First")
-			claudePath := writeClaudeProjectSession(t, claudeRoot, "project", "missing")
-			archive := openTestDB(t)
-			engine := NewEngine(t.Context(), archive, EngineConfig{AgentDirs: map[parser.AgentType][]string{
-				parser.AgentAntigravity: {root}, parser.AgentClaude: {claudeRoot},
-			}, Machine: "host-a"})
-			t.Cleanup(engine.Close)
-			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript, claudePath}))
-			require.NoError(t, os.Remove(claudePath))
-			if mode == "plan" {
-				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{claudePath}))
-			}
-			beforeSync, beforeStats := engine.LastSync(), engine.LastSyncStats()
-			raw, err := sql.Open("sqlite3", archive.Path())
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, raw.Close()) })
-			_, err = raw.Exec(`CREATE TRIGGER fail_title_write BEFORE UPDATE OF session_name ON sessions BEGIN SELECT RAISE(FAIL, 'injected title write failure'); END`)
-			require.NoError(t, err)
-			dbtest.SetAntigravityTitle(t, root, "Later")
-			spy := &antigravityTitleQuerySpy{Store: archive, reader: archive}
-			engine.archiveStore = spy
-			engine.deferredAntigravityTitles = make(map[string]*string)
-			switch mode {
-			case "watcher":
-				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{claudePath}))
-			case "plan":
-				plan, err := engine.PlanChangedPathsContext(t.Context(), []string{store})
+			synctest.Test(t, func(t *testing.T) {
+				root, claudeRoot := t.TempDir(), t.TempDir()
+				transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
+				store := dbtest.SetAntigravityTitle(t, root, "First")
+				claudePath := writeClaudeProjectSession(t, claudeRoot, "project", "missing")
+				archive := openTestDB(t)
+				engine := NewEngine(t.Context(), archive, EngineConfig{AgentDirs: map[parser.AgentType][]string{
+					parser.AgentAntigravity: {root}, parser.AgentClaude: {claudeRoot},
+				}, Machine: "host-a"})
+				t.Cleanup(engine.Close)
+				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript, claudePath}))
+				require.NoError(t, os.Remove(claudePath))
+				if mode == "plan" {
+					require.NoError(t, engine.SyncPathsContext(t.Context(), []string{claudePath}))
+				}
+				beforeSync, beforeStats := engine.LastSync(), engine.LastSyncStats()
+				dbtest.SetAntigravityTitle(t, root, "Later")
+				failurePath := archive.Path()
+				inject := `CREATE TRIGGER fail_title_write BEFORE UPDATE OF session_name ON sessions BEGIN SELECT RAISE(FAIL, 'injected title write failure'); END`
+				repair := "DROP TRIGGER fail_title_write"
+				if mode == "watcher-read" {
+					failurePath = store
+					inject = "ALTER TABLE conversation_summaries RENAME TO unavailable_summaries"
+					repair = "ALTER TABLE unavailable_summaries RENAME TO conversation_summaries"
+				}
+				raw, err := sql.Open("sqlite3", failurePath)
 				require.NoError(t, err)
-				result, err := engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
+				t.Cleanup(func() { require.NoError(t, raw.Close()) })
+				_, err = raw.Exec(inject)
 				require.NoError(t, err)
-				assert.False(t, result.Stats.ProcessingComplete())
-			case "recovery":
-				stats, _, err := engine.ReconcileWatchRootsWithStats(t.Context(), []string{claudeRoot}, false, nil)
+				spy := &antigravityTitleQuerySpy{Store: archive, reader: archive}
+				engine.archiveStore = spy
+				engine.deferredAntigravityTitles = make(map[string]*string)
+				calls := make(chan WatchBatch, 2)
+				switch mode {
+				case "watcher", "watcher-read":
+					watcher, err := newWatcherWithBackend(0, 20*time.Millisecond, func(ctx context.Context, batch WatchBatch) error {
+						err := ApplyWatchBatch(ctx, engine, batch, nil)
+						calls <- batch
+						return err
+					}, newFakeWatchBackend(), 8, 10_000)
+					require.NoError(t, err)
+					watcher.Start()
+					defer watcher.Stop()
+					watcher.QueueRetryBatch(WatchBatch{Paths: []string{claudePath, store}})
+					requireReceiveWithin(t, calls, time.Second)
+					synctest.Wait()
+				case "plan":
+					plan, err := engine.PlanChangedPathsContext(t.Context(), []string{store})
+					require.NoError(t, err)
+					result, err := engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
+					require.NoError(t, err)
+					assert.False(t, result.Stats.ProcessingComplete())
+				case "recovery":
+					stats, _, err := engine.ReconcileWatchRootsWithStats(t.Context(), []string{claudeRoot}, false, nil)
+					require.NoError(t, err)
+					assert.Equal(t, 1, stats.Failed)
+				case "grouped":
+					require.NoError(t, engine.ReconcileProviderRootsGrouped(t.Context(), []ProviderRootsGroup{
+						{Agent: parser.AgentClaude, Roots: []string{claudeRoot}},
+						{Agent: parser.AgentAntigravity, Roots: []string{root}},
+					}))
+				}
+				if mode != "watcher-read" {
+					assert.Len(t, spy.queries, 1, "the grouped pass attempts each title store once")
+				}
+				assert.Equal(t, 1, engine.LastSyncStats().Failed)
+				assert.Empty(t, engine.SnapshotAntigravityTitleStates())
+				session, err := archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
 				require.NoError(t, err)
-				assert.Equal(t, 1, stats.Failed)
-			case "grouped":
-				require.NoError(t, engine.ReconcileProviderRootsGrouped(t.Context(), []ProviderRootsGroup{
-					{Agent: parser.AgentClaude, Roots: []string{claudeRoot}},
-					{Agent: parser.AgentAntigravity, Roots: []string{root}},
-				}))
-			}
-			assert.Len(t, spy.queries, 1, "the grouped pass attempts each title store once")
-			assert.Equal(t, 1, engine.LastSyncStats().Failed)
-			assert.Empty(t, engine.SnapshotAntigravityTitleStates())
-			session, err := archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
-			require.NoError(t, err)
-			assert.Equal(t, new("First"), session.SessionName)
-			if mode == "plan" {
-				assert.Equal(t, beforeSync, engine.LastSync())
-			}
-			var missing sql.NullString
-			require.NoError(t, archive.Reader().QueryRow(t.Context(), "SELECT source_missing_at FROM sessions WHERE id = 'missing'").Scan(&missing))
-			assert.True(t, missing.Valid, "title failures preserve other agents' deletion proof")
-			_, err = raw.Exec("DROP TRIGGER fail_title_write")
-			require.NoError(t, err)
-			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{filepath.Join(root, "unrelated")}))
-			session, err = archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
-			require.NoError(t, err)
-			assert.Equal(t, new("Later"), session.SessionName)
-			assert.Equal(t, beforeStats.TitlesUpdated+1, engine.LastSyncStats().TitlesUpdated)
-			assert.True(t, engine.LastSync().After(beforeSync))
+				assert.Equal(t, new("First"), session.SessionName)
+				if mode == "plan" {
+					assert.Equal(t, beforeSync, engine.LastSync())
+				}
+				var missing sql.NullString
+				require.NoError(t, archive.Reader().QueryRow(t.Context(), "SELECT source_missing_at FROM sessions WHERE id = 'missing'").Scan(&missing))
+				assert.True(t, missing.Valid, "title failures preserve other agents' deletion proof")
+				_, err = raw.Exec(repair)
+				require.NoError(t, err)
+				if mode == "watcher" || mode == "watcher-read" {
+					time.Sleep(20 * time.Millisecond)
+					synctest.Wait()
+					retry := requireReceiveWithin(t, calls, time.Second)
+					assert.Equal(t, []string{store}, retry.Paths)
+					assert.Empty(t, retry.ReconcileRoots)
+					assert.False(t, retry.FullSync)
+				} else {
+					time.Sleep(time.Nanosecond)
+					require.NoError(t, engine.SyncPathsContext(t.Context(), []string{filepath.Join(root, "unrelated")}))
+				}
+				session, err = archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
+				require.NoError(t, err)
+				assert.Equal(t, new("Later"), session.SessionName)
+				assert.Equal(t, beforeStats.TitlesUpdated+1, engine.LastSyncStats().TitlesUpdated)
+				assert.True(t, engine.LastSync().After(beforeSync))
+			})
 		})
 	}
 }
@@ -161,7 +218,7 @@ func TestAntigravityMatchingMarkersExpireOrRefreshOnRequest(t *testing.T) {
 					time.Sleep(parser.SQLiteContainerDigestVerifyInterval)
 					require.NoError(t, engine.SyncPathsContext(t.Context(), []string{filepath.Join(root, "unrelated")}))
 				case "watcher":
-					require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store + "-wal"}))
+					require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
 				case "plan":
 					plan, err := engine.PlanChangedPathsContext(t.Context(), []string{store})
 					require.NoError(t, err)

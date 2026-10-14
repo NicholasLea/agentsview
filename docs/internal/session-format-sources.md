@@ -3627,7 +3627,9 @@ schemas keep their existing ordering behavior.
   title; a blank title clears it. Rechecked 2026-10-13 with synthetic stores:
   missing tables or columns preserve archived titles; 17 roots retain applied
   title states; checkpointed renames
-  with matching markers refresh on store events, full sync, or after five minutes.
+  with matching markers refresh on main-file or framed-WAL events, full sync,
+  or after five minutes. Reader-created frameless WAL events cause no reread;
+  watcher failures retry only the affected title stores.
 
 ## Antigravity CLI (`antigravity-cli`)
 

@@ -18,6 +18,8 @@ type appliedAntigravityTitles struct {
 	readAt time.Time
 }
 
+type antigravityTitleRetryContextKey struct{}
+
 func (e *Engine) invalidateAntigravityTitleCache(paths []string) {
 	if paths == nil {
 		clear(e.appliedAntigravityTitles)
@@ -27,6 +29,11 @@ func (e *Engine) invalidateAntigravityTitleCache(paths []string) {
 	}
 	for _, path := range paths {
 		store := strings.TrimSuffix(filepath.Clean(path), "-wal")
+		if filepath.Base(store) == parser.AntigravitySummariesDBName {
+			if _, ok := parser.SQLiteContainerPathForEvent(filepath.Dir(store), path, parser.AntigravitySummariesDBName, true); !ok {
+				continue
+			}
+		}
 		delete(e.appliedAntigravityTitles, store)
 		parser.InvalidateAntigravityTitles(store)
 	}
@@ -54,16 +61,16 @@ func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, stats *Sy
 		delete(e.appliedAntigravityTitles, store)
 		parser.InvalidateAntigravityTitles(store)
 		titles, state, err := parser.AntigravityStoreTitles(ctx, store)
-		if err != nil {
-			stats.RecordFailed()
-			parser.InvalidateAntigravityTitles(store)
-			log.Printf("antigravity titles %s: %v", store, err)
-			continue
+		if err == nil {
+			var n int
+			n, err = e.applyAntigravityStoreTitles(ctx, root, titles)
+			stats.TitlesUpdated += n
 		}
-		n, err := e.applyAntigravityStoreTitles(ctx, root, titles)
-		stats.TitlesUpdated += n
 		if err != nil {
 			stats.RecordFailed()
+			if retry, ok := ctx.Value(antigravityTitleRetryContextKey{}).(*WatchBatch); ok {
+				retry.Paths = watchAppendUniqueString(retry.Paths, store)
+			}
 			parser.InvalidateAntigravityTitles(store)
 			log.Printf("antigravity titles %s: %v", store, err)
 			continue
