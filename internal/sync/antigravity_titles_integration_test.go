@@ -79,6 +79,9 @@ func TestAntigravityTitlesFollowStoreWithoutReparse(t *testing.T) {
 				assert.Equal(t, tc.updates, result.Stats.TitlesUpdated)
 				assert.Equal(t, tc.want, antigravityStoredTitle(t, archive))
 			}
+			dbtest.SetAntigravityTitle(t, root, "Direct refresh")
+			require.NoError(t, engine.SyncSingleSessionContext(t.Context(), "antigravity:"+dbtest.AntigravityTitleID))
+			assert.Equal(t, new("Direct refresh"), antigravityStoredTitle(t, archive))
 		})
 	}
 }
@@ -125,7 +128,7 @@ func TestAntigravityUnreadableTitleStoreKeepsTitle(t *testing.T) {
 			}
 			require.NoError(t, os.WriteFile(store, data, 0o644))
 			parser.InvalidateAntigravityTitles(store)
-			_, err := parser.AntigravityStoreTitles(t.Context(), store)
+			_, _, err := parser.AntigravityStoreTitles(t.Context(), store)
 			assert.Error(t, err)
 			dbtest.WriteAntigravityTitleTranscript(t, root, "hello again")
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript, store}))
@@ -222,7 +225,7 @@ func TestAntigravityTitleWriteFailureRetriesAndKeepsSyncStatus(t *testing.T) {
 	plan, err = engine.PlanChangedPathsContext(t.Context(), []string{store})
 	require.NoError(t, err)
 	result, err := engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
-	require.ErrorContains(t, err, "injected title write failure")
+	require.NoError(t, err)
 	assert.Equal(t, 1, result.Stats.Failed)
 	assert.False(t, result.Stats.ProcessingComplete())
 	assert.Empty(t, engine.SnapshotAntigravityTitleStates())

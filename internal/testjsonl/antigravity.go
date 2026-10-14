@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const AntigravityTitleSchema = `CREATE TABLE IF NOT EXISTS conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT)`
+
 func WriteAntigravityBrainTranscript(t *testing.T, root, id, body string) string {
 	t.Helper()
 	path := filepath.Join(root, "brain", id, ".system_generated", "logs", "transcript.jsonl")

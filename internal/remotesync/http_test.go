@@ -1206,25 +1206,68 @@ func TestHTTPUnchangedMirrorBackfillsAntigravityTitles(t *testing.T) {
 	newer := []byte(`{"version":2,"states":{}}`)
 	require.NoError(t, os.WriteFile(sidecar, newer, 0o600))
 	_, err = hs.Run(t.Context())
-	require.ErrorContains(t, err, "unsupported Antigravity title verification version 2")
+	require.NoError(t, err)
 	unchanged, err := os.ReadFile(sidecar)
 	require.NoError(t, err)
 	assert.Equal(t, newer, unchanged)
 	dbtest.SetAntigravityTitle(t, remote.dir, "Later title")
-	_, err = hs.Run(t.Context())
-	require.ErrorContains(t, err, "unsupported Antigravity title verification version 2")
+	updated, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 1, updated.SessionsSynced)
 	unchanged, err = os.ReadFile(sidecar)
 	require.NoError(t, err)
 	assert.Equal(t, newer, unchanged)
 	require.NoError(t, os.Remove(sidecar))
 	fourth, err := hs.Run(t.Context())
 	require.NoError(t, err)
-	assert.Equal(t, 1, fourth.SessionsSynced)
+	assert.Zero(t, fourth.SessionsSynced)
 	after, err = database.GetSessionFull(t.Context(), sessionID)
 	require.NoError(t, err)
 	require.NotNil(t, after)
 	assert.Equal(t, new("Later title"), after.SessionName)
 	assert.Equal(t, before.TranscriptRevision, after.TranscriptRevision)
+}
+
+func TestHTTPAntigravityAppliedStatesSurviveTitleCacheEviction(t *testing.T) {
+	remote := newMirrorTestRemote(t)
+	var roots []string
+	for i := range 17 {
+		root := filepath.Join(remote.dir, fmt.Sprintf("root-%d", i))
+		require.NoError(t, os.MkdirAll(root, 0o755))
+		dbtest.SetAntigravityTitle(t, root, "Saved title")
+		roots = append(roots, root)
+	}
+	dbtest.WriteAntigravityTitleTranscript(t, roots[0], "hello")
+	remote.targets.Dirs = map[parser.AgentType][]string{parser.AgentAntigravity: roots}
+	database, hs := newMirrorSync(t, remote, t.TempDir())
+	_, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	sidecar := mirrorAntigravityTitlesPath(MirrorDir(hs.DataDir, hs.Host))
+	raw, err := os.ReadFile(sidecar)
+	require.NoError(t, err)
+	var record antigravityTitleVerification
+	require.NoError(t, json.Unmarshal(raw, &record))
+	assert.Len(t, record.States, 17)
+	session, err := database.GetSessionFull(t.Context(), "devbox~antigravity:"+dbtest.AntigravityTitleID)
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	assert.Equal(t, new("Saved title"), session.SessionName)
+	journalWrites := 0
+	hs.runPrepare = func(ctx context.Context) (*PreparedHTTP, error) {
+		return hs.prepare(ctx, func(prepared *PreparedHTTP) {
+			replace := prepared.replaceJournal
+			prepared.replaceJournal = func(path string, journal MirrorChangeJournal) error {
+				journalWrites++
+				return replace(path, journal)
+			}
+		})
+	}
+	for range 2 {
+		idle, err := hs.Run(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, SyncStats{}, idle)
+	}
+	assert.Zero(t, journalWrites)
 }
 
 func TestHTTPUnchangedMirrorAntigravityVerificationWriteFailure(t *testing.T) {
@@ -1268,8 +1311,9 @@ func TestHTTPUnchangedMirrorRetriesUnreadableAntigravityTitles(t *testing.T) {
 	_, err = conn.Exec("ALTER TABLE conversation_summaries RENAME TO unreadable_summaries")
 	require.NoError(t, err)
 	require.NoError(t, conn.Close())
-	_, err = hs.Run(t.Context())
-	require.NoError(t, err)
+	unreadable, err := hs.Run(t.Context())
+	require.ErrorContains(t, err, "remote import processing incomplete")
+	assert.Equal(t, 1, unreadable.Failed)
 	requests := len(remote.archiveRequests)
 	journalWrites := 0
 	hs.runPrepare = func(ctx context.Context) (*PreparedHTTP, error) {
@@ -1282,7 +1326,8 @@ func TestHTTPUnchangedMirrorRetriesUnreadableAntigravityTitles(t *testing.T) {
 		})
 	}
 	idle, err := hs.Run(t.Context())
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "remote import processing incomplete")
+	assert.Equal(t, 1, idle.Failed)
 	assert.Equal(t, 0, idle.SessionsSynced)
 	assert.Positive(t, journalWrites)
 	assert.Len(t, remote.archiveRequests, requests)

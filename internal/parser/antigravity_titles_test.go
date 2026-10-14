@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/agentsview/internal/testjsonl"
 )
 
 func TestAntigravityTitleCacheExpiresMatchingMarkers(t *testing.T) {
@@ -20,7 +21,9 @@ func TestAntigravityTitleCacheExpiresMatchingMarkers(t *testing.T) {
 	conn, err := sql.Open("sqlite3", store)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, conn.Close()) })
-	_, err = conn.Exec(`PRAGMA journal_mode=WAL; CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT); INSERT INTO conversation_summaries VALUES ('conversation-a', 'First')`)
+	_, err = conn.Exec(testjsonl.AntigravityTitleSchema)
+	require.NoError(t, err)
+	_, err = conn.Exec(`PRAGMA journal_mode=WAL; INSERT INTO conversation_summaries VALUES ('conversation-a', 'First')`)
 	require.NoError(t, err)
 	checkpoint := func() {
 		_, err := conn.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -30,7 +33,7 @@ func TestAntigravityTitleCacheExpiresMatchingMarkers(t *testing.T) {
 		}
 	}
 	checkpoint()
-	titles, err := AntigravityStoreTitles(t.Context(), store)
+	titles, _, err := AntigravityStoreTitles(t.Context(), store)
 	require.NoError(t, err)
 	require.Equal(t, "First", titles["conversation-a"])
 	before, ok := StatSQLiteContainerState(store)
@@ -41,11 +44,11 @@ func TestAntigravityTitleCacheExpiresMatchingMarkers(t *testing.T) {
 	after, ok := StatSQLiteContainerState(store)
 	require.True(t, ok)
 	require.Equal(t, before, after)
-	titles, err = AntigravityStoreTitles(t.Context(), store)
+	titles, _, err = AntigravityStoreTitles(t.Context(), store)
 	require.NoError(t, err)
 	assert.Equal(t, "First", titles["conversation-a"])
 	now = now.Add(SQLiteContainerDigestVerifyInterval)
-	titles, err = AntigravityStoreTitles(t.Context(), store)
+	titles, _, err = AntigravityStoreTitles(t.Context(), store)
 	require.NoError(t, err)
 	assert.Equal(t, "Later", titles["conversation-a"])
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/agentsview/internal/testjsonl"
 )
 
 func TestAntigravityProviderSourceMethods(t *testing.T) {
@@ -77,7 +78,9 @@ func TestAntigravityProviderFingerprintAndParse(t *testing.T) {
 	writeAntigravityIDEProviderFixture(t, root, id)
 	titles, err := sql.Open("sqlite3", filepath.Join(root, AntigravitySummariesDBName))
 	require.NoError(t, err)
-	_, err = titles.Exec(`CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT); INSERT INTO conversation_summaries VALUES (?, 'Database conversation')`, id)
+	_, err = titles.Exec(testjsonl.AntigravityTitleSchema)
+	require.NoError(t, err)
+	_, err = titles.Exec(`INSERT INTO conversation_summaries VALUES (?, 'Database conversation')`, id)
 	require.NoError(t, err)
 	require.NoError(t, titles.Close())
 

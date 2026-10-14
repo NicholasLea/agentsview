@@ -23,7 +23,7 @@ func SetAntigravityTitle(t *testing.T, root string, title any) string {
 	conn, err := sql.Open("sqlite3", path)
 	require.NoError(t, err)
 	defer conn.Close()
-	_, err = conn.Exec(`CREATE TABLE IF NOT EXISTS conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT)`)
+	_, err = conn.Exec(testjsonl.AntigravityTitleSchema)
 	require.NoError(t, err)
 	_, err = conn.Exec(`INSERT INTO conversation_summaries VALUES (?, ?) ON CONFLICT(conversation_id) DO UPDATE SET title = excluded.title`, AntigravityTitleID, title)
 	require.NoError(t, err)

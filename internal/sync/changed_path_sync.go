@@ -117,13 +117,13 @@ func (e *Engine) SyncChangedPathPlanWithOptionsContext(
 		for path := range plan.attribution {
 			e.invalidateAntigravityTitleCache([]string{path})
 		}
-		err := e.reconcileAntigravityTitlesLocked(ctx, &result.Stats)
+		e.reconcileAntigravityTitlesLocked(ctx, &result.Stats)
 		e.recordAntigravityTitleUpdates(result.Stats)
 		e.syncMu.Unlock()
 		if result.Stats.TitlesUpdated > 0 {
 			e.emit("sessions")
 		}
-		return result, errors.Join(err, ctx.Err())
+		return result, ctx.Err()
 	}
 
 	e.syncMu.Lock()
@@ -200,7 +200,8 @@ func (e *Engine) SyncChangedPathPlanWithOptionsContext(
 	if !e.ephemeral {
 		e.persistSkipCache(ctx)
 	}
-	processErr = errors.Join(processErr, e.reconcileAntigravityTitlesLocked(ctx, &stats))
+	processingComplete := stats.ProcessingComplete()
+	e.reconcileAntigravityTitlesLocked(ctx, &stats)
 	e.mu.Lock()
 	e.lastSync = time.Now()
 	e.lastSyncStats = stats
@@ -213,7 +214,7 @@ func (e *Engine) SyncChangedPathPlanWithOptionsContext(
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	if !stats.ProcessingComplete() {
+	if !processingComplete {
 		return result, errors.Join(processErr, fmt.Errorf(
 			"changed-path plan sync incomplete: %d source or archive failures",
 			stats.Failed,

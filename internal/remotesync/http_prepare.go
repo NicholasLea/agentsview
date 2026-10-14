@@ -1110,7 +1110,7 @@ func (p *PreparedHTTP) antigravityTitlesPending() (bool, error) {
 		return true, nil
 	}
 	if applied.Version > 1 {
-		return false, fmt.Errorf("unsupported Antigravity title verification version %d", applied.Version)
+		return true, nil
 	}
 	if applied.Version != 1 {
 		return true, nil
@@ -1121,6 +1121,14 @@ func (p *PreparedHTTP) antigravityTitlesPending() (bool, error) {
 func (p *PreparedHTTP) persistAntigravityTitleStates() error {
 	if len(p.targets.Dirs[parser.AgentAntigravity]) == 0 || p.sync.DB.ArchiveContent().UsageOnly() {
 		return nil
+	}
+	if data, err := os.ReadFile(mirrorAntigravityTitlesPath(p.root)); err == nil {
+		var applied struct {
+			Version int `json:"version"`
+		}
+		if json.Unmarshal(data, &applied) == nil && applied.Version > 1 {
+			return nil
+		}
 	}
 	data, err := json.Marshal(antigravityTitleVerification{Version: 1, States: p.mirrorImport.pending.antigravityTitleStates})
 	if err != nil {

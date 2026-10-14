@@ -33,26 +33,18 @@ func InvalidateAntigravityTitles(path string) {
 	delete(antigravityTitleCache.stores, path)
 }
 
-// Only successful reads can settle a remote title backfill.
-func AntigravityTitleStoreState(path string) (SQLiteContainerState, bool) {
-	antigravityTitleCache.Lock()
-	defer antigravityTitleCache.Unlock()
-	snapshot, ok := antigravityTitleCache.stores[path]
-	return snapshot.state, ok && snapshot.err == nil
-}
-
 // Matching markers can hide writes, so cached titles expire.
-func AntigravityStoreTitles(ctx context.Context, path string) (map[string]string, error) {
+func AntigravityStoreTitles(ctx context.Context, path string) (map[string]string, SQLiteContainerState, error) {
 	state, ok := StatSQLiteContainerState(path)
 	antigravityTitleCache.Lock()
 	defer antigravityTitleCache.Unlock()
 	now := antigravityTitleNow()
-	if prior, cached := antigravityTitleCache.stores[path]; ok && cached && prior.state == state && now.Sub(prior.readAt) >= 0 && now.Sub(prior.readAt) < SQLiteContainerDigestVerifyInterval {
-		return prior.titles, prior.err
+	if prior, cached := antigravityTitleCache.stores[path]; ok && cached && prior.state == state && now.Sub(prior.readAt) < SQLiteContainerDigestVerifyInterval {
+		return prior.titles, prior.state, prior.err
 	}
 	titles, err := readAntigravityTitles(ctx, path)
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, state, ctx.Err()
 	}
 	if ok {
 		// Remote imports extract stores into fresh temp roots; bound what stays cached.
@@ -63,7 +55,7 @@ func AntigravityStoreTitles(ctx context.Context, path string) (map[string]string
 	} else {
 		delete(antigravityTitleCache.stores, path)
 	}
-	return titles, err
+	return titles, state, err
 }
 
 func readAntigravityTitles(ctx context.Context, path string) (map[string]string, error) {
@@ -115,7 +107,7 @@ func AntigravitySessionRoot(path string) (string, bool) {
 // unreadable store or missing entry leaves no title signal, so the stored
 // name survives the write.
 func applyAntigravityTitle(ctx context.Context, sess *ParsedSession, src antigravitySource) {
-	titles, err := AntigravityStoreTitles(ctx, filepath.Join(src.Root, AntigravitySummariesDBName))
+	titles, _, err := AntigravityStoreTitles(ctx, filepath.Join(src.Root, AntigravitySummariesDBName))
 	if err != nil {
 		return
 	}
