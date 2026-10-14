@@ -50,11 +50,11 @@ func TestAntigravityUnrelatedChangedPathSkipsUnchangedStoreQueries(t *testing.T)
 }
 
 func TestAntigravityTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
-	for _, mode := range []string{"watcher", "recovery", "grouped"} {
+	for _, mode := range []string{"watcher", "plan", "recovery", "grouped"} {
 		t.Run(mode, func(t *testing.T) {
 			root, claudeRoot := t.TempDir(), t.TempDir()
 			transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
-			dbtest.SetAntigravityTitle(t, root, "First")
+			store := dbtest.SetAntigravityTitle(t, root, "First")
 			claudePath := writeClaudeProjectSession(t, claudeRoot, "project", "missing")
 			archive := openTestDB(t)
 			engine := NewEngine(t.Context(), archive, EngineConfig{AgentDirs: map[parser.AgentType][]string{
@@ -63,6 +63,10 @@ func TestAntigravityTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
 			t.Cleanup(engine.Close)
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript, claudePath}))
 			require.NoError(t, os.Remove(claudePath))
+			if mode == "plan" {
+				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{claudePath}))
+			}
+			beforeSync, beforeStats := engine.LastSync(), engine.LastSyncStats()
 			raw, err := sql.Open("sqlite3", archive.Path())
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, raw.Close()) })
@@ -75,6 +79,12 @@ func TestAntigravityTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
 			switch mode {
 			case "watcher":
 				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{claudePath}))
+			case "plan":
+				plan, err := engine.PlanChangedPathsContext(t.Context(), []string{store})
+				require.NoError(t, err)
+				result, err := engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
+				require.NoError(t, err)
+				assert.False(t, result.Stats.ProcessingComplete())
 			case "recovery":
 				stats, _, err := engine.ReconcileWatchRootsWithStats(t.Context(), []string{claudeRoot}, false, nil)
 				require.NoError(t, err)
@@ -88,15 +98,23 @@ func TestAntigravityTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
 			assert.Len(t, spy.queries, 1, "the grouped pass attempts each title store once")
 			assert.Equal(t, 1, engine.LastSyncStats().Failed)
 			assert.Empty(t, engine.SnapshotAntigravityTitleStates())
+			session, err := archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
+			require.NoError(t, err)
+			assert.Equal(t, new("First"), session.SessionName)
+			if mode == "plan" {
+				assert.Equal(t, beforeSync, engine.LastSync())
+			}
 			var missing sql.NullString
 			require.NoError(t, archive.Reader().QueryRow(t.Context(), "SELECT source_missing_at FROM sessions WHERE id = 'missing'").Scan(&missing))
 			assert.True(t, missing.Valid, "title failures preserve other agents' deletion proof")
 			_, err = raw.Exec("DROP TRIGGER fail_title_write")
 			require.NoError(t, err)
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{filepath.Join(root, "unrelated")}))
-			session, err := archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
+			session, err = archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
 			require.NoError(t, err)
 			assert.Equal(t, new("Later"), session.SessionName)
+			assert.Equal(t, beforeStats.TitlesUpdated+1, engine.LastSyncStats().TitlesUpdated)
+			assert.True(t, engine.LastSync().After(beforeSync))
 		})
 	}
 }

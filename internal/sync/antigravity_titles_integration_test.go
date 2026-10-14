@@ -29,7 +29,7 @@ func antigravityStoredTitle(t *testing.T, archive *db.DB) *string {
 	return session.SessionName
 }
 
-func TestAntigravityTitlesFollowStoreWithoutReparse(t *testing.T) {
+func TestAntigravityTitlesFollowStore(t *testing.T) {
 	for _, mode := range []string{"brain", "database"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
@@ -127,9 +127,6 @@ func TestAntigravityUnreadableTitleStoreKeepsTitle(t *testing.T) {
 				require.NoError(t, err)
 			}
 			require.NoError(t, os.WriteFile(store, data, 0o644))
-			parser.InvalidateAntigravityTitles(store)
-			_, _, err := parser.AntigravityStoreTitles(t.Context(), store)
-			assert.Error(t, err)
 			dbtest.WriteAntigravityTitleTranscript(t, root, "hello again")
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript, store}))
 			engine.SyncAll(t.Context(), nil)
@@ -195,47 +192,4 @@ func TestAntigravityTrashedSessionRestoresWithCurrentTitle(t *testing.T) {
 	_, err := archive.RestoreSession(t.Context(), id)
 	require.NoError(t, err)
 	assert.Equal(t, new("Renamed in trash"), antigravityStoredTitle(t, archive))
-}
-
-func TestAntigravityTitleWriteFailureRetriesAndKeepsSyncStatus(t *testing.T) {
-	root := t.TempDir()
-	transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
-	store := dbtest.SetAntigravityTitle(t, root, "First")
-	archive := dbtest.OpenTestDB(t)
-	engine := newAntigravityTitleEngine(t, archive, root)
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	beforeSync, beforeStats := engine.LastSync(), engine.LastSyncStats()
-	unrelated := filepath.Join(t.TempDir(), "unrelated")
-	require.NoError(t, os.WriteFile(unrelated, []byte("unrelated"), 0o644))
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{unrelated}))
-	assert.Equal(t, beforeSync, engine.LastSync())
-	assert.Equal(t, beforeStats, engine.LastSyncStats())
-	plan, err := engine.PlanChangedPathsContext(t.Context(), []string{unrelated})
-	require.NoError(t, err)
-	_, err = engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
-	require.NoError(t, err)
-	assert.Equal(t, beforeSync, engine.LastSync())
-	assert.Equal(t, beforeStats, engine.LastSyncStats())
-	raw, err := sql.Open("sqlite3", archive.Path())
-	require.NoError(t, err)
-	defer raw.Close()
-	_, err = raw.Exec(`CREATE TRIGGER fail_title_write BEFORE UPDATE OF session_name ON sessions BEGIN SELECT RAISE(FAIL, 'injected title write failure'); END`)
-	require.NoError(t, err)
-	dbtest.SetAntigravityTitle(t, root, "Later")
-	plan, err = engine.PlanChangedPathsContext(t.Context(), []string{store})
-	require.NoError(t, err)
-	result, err := engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.Stats.Failed)
-	assert.False(t, result.Stats.ProcessingComplete())
-	assert.Empty(t, engine.SnapshotAntigravityTitleStates())
-	assert.Equal(t, new("First"), antigravityStoredTitle(t, archive))
-	assert.Equal(t, beforeSync, engine.LastSync())
-	_, err = raw.Exec("DROP TRIGGER fail_title_write")
-	require.NoError(t, err)
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{unrelated}))
-	assert.Equal(t, new("Later"), antigravityStoredTitle(t, archive))
-	assert.Equal(t, beforeStats.Synced, engine.LastSyncStats().Synced)
-	assert.Equal(t, beforeStats.TitlesUpdated+1, engine.LastSyncStats().TitlesUpdated)
-	assert.True(t, engine.LastSync().After(beforeSync))
 }

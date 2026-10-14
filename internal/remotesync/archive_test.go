@@ -146,7 +146,7 @@ func TestWriteArchiveSkipsDirectoryValuedExtraFile(t *testing.T) {
 	assert.ErrorIs(t, err, io.EOF)
 }
 
-func TestHermesArchivesSnapshotWALCommitBeforeCheckpoint(t *testing.T) {
+func TestArchivesSnapshotWALCommitBeforeCheckpoint(t *testing.T) {
 	tests := []struct {
 		name        string
 		antigravity bool

@@ -20,7 +20,7 @@ func TestAntigravityBrainReadFailurePreservesArchive(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
-			const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+			const id = dbtest.AntigravityTitleID
 			path := dbtest.WriteAntigravityTitleTranscript(t, root, "keep this archived message")
 			if withDatabase {
 				dbPath := filepath.Join(root, "conversations", id+".db")
@@ -60,7 +60,7 @@ func TestAntigravityBrainReadFailurePreservesArchive(t *testing.T) {
 
 func TestAntigravityBrainDatabaseTransitionsKeepOneSession(t *testing.T) {
 	root := t.TempDir()
-	const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	const id = dbtest.AntigravityTitleID
 	const sessionID = "antigravity:" + id
 	path := dbtest.WriteAntigravityTitleTranscript(t, root, "one conversation")
 	archive := dbtest.OpenTestDB(t)
