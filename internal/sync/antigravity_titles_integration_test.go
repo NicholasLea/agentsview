@@ -46,6 +46,7 @@ func TestAntigravityTitlesFollowStoreWithoutReparse(t *testing.T) {
 	after, err := archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
 	require.NoError(t, err)
 	assert.Equal(t, new("Second"), after.SessionName, "a store-only rename updates the title")
+	assert.Equal(t, 1, engine.LastSyncStats().TitlesUpdated)
 	assert.Equal(t, before.FileHash, after.FileHash, "a rename leaves the transcript fingerprint alone")
 
 	dbtest.SetAntigravityTitle(t, root, "  ")
@@ -62,7 +63,9 @@ func TestAntigravityTitlesFollowStoreWithoutReparse(t *testing.T) {
 		{title: "\x00\x00", want: nil, updates: 0},
 	} {
 		dbtest.SetAntigravityTitle(t, root, tc.title)
-		result, err := engine.SyncChangedPathPlanContext(t.Context(), sync.ChangedPathPlan{}, nil)
+		plan, err := engine.PlanChangedPathsContext(t.Context(), []string{store})
+		require.NoError(t, err)
+		result, err := engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
 		require.NoError(t, err)
 		assert.Equal(t, tc.updates, result.Stats.TitlesUpdated)
 		assert.Equal(t, tc.want, antigravityStoredTitle(t, archive))

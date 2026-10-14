@@ -3623,7 +3623,8 @@ schemas keep their existing ordering behavior.
   each sync pass copies changed titles onto stored sessions, including those
   whose transcript is gone. A NULL title or unreadable store keeps the stored
   title; a blank title clears it. Rechecked 2026-10-13 with synthetic stores:
-  missing tables or columns return an error and preserve archived titles.
+  missing tables or columns preserve archived titles; checkpointed renames
+  with matching markers refresh on store events, full sync, or after five minutes.
 
 ## Antigravity CLI (`antigravity-cli`)
 

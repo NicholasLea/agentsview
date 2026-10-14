@@ -658,9 +658,8 @@ type Engine struct {
 	completeSourceMirror    bool
 	emitter                 Emitter
 	providerMigrationModes  map[parser.AgentType]parser.ProviderMigrationMode
-	// antigravityTitleStates records each title store's state at its last
-	// applied read. Guarded by syncMu.
-	antigravityTitleStates map[string]parser.SQLiteContainerState
+	// Guarded by syncMu so failed reads and completed writes share a bounded retry window.
+	antigravityTitleStates map[string]antigravityTitleState
 
 	providerWatchRootsMu    gosync.Mutex
 	providerWatchRoots      map[parser.AgentType][]parser.WatchRoot
@@ -1819,11 +1818,16 @@ func (e *Engine) syncChangedPathsLocked(
 	})
 	ctx = parser.WithProjectRootMemo(ctx)
 	ctx = parser.WithCodexParentInventoryBatch(ctx)
+	e.invalidateAntigravityTitleStates(paths)
 	stats, tombstoned, err := e.applyChangedPathSyncLocked(
 		ctx, e.prepareChangedPathSync(ctx, paths),
 	)
 	// Title store events carry no session files, so this also handles them.
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx)
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, false)
+	e.mu.Lock()
+	e.lastSync = time.Now()
+	e.lastSyncStats = stats
+	e.mu.Unlock()
 	return stats, tombstoned, err
 }
 
@@ -3711,7 +3715,15 @@ func (e *Engine) resyncBuildLocked(
 	copiedSessionIDs = append(copiedSessionIDs, orphaned...)
 	for id, name := range deferredTitles {
 		if err := newDB.RefreshNativeSessionName(ctx, id, name); err != nil {
-			log.Printf("resync: apply deferred antigravity title: %v", err)
+			stats.Aborted = true
+			e.antigravityTitleStates = nil
+			newDB.Close()
+			removeTempDB(tempPath)
+			restoreSkipCache()
+			e.mu.Lock()
+			e.lastSyncStats = stats
+			e.mu.Unlock()
+			return stats, fmt.Errorf("apply deferred antigravity title: %w", err)
 		}
 	}
 	deferredCwdUpdated, err := e.applyDeferredSourceCwd(ctx,
@@ -5725,7 +5737,7 @@ func (e *Engine) reconcileWatchRootsStreamedLocked(
 		}
 	}
 	// Recovery passes also catch title store events the watcher missed.
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx)
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, false)
 	canTombstoneCompletedScopes :=
 		retErr == nil && (failures > 0 || stats.Deferred > 0) &&
 			stats.Failed == 0 && !stats.Aborted
@@ -8275,7 +8287,7 @@ func (e *Engine) syncAllLocked(
 	} else {
 		stats.RecordLinksUpdated(linked)
 	}
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx)
+	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, true)
 
 	e.reportFinalizingProgress(
 		onProgress, writeMode, finalizingSkipCacheDetail,

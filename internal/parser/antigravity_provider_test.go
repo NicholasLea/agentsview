@@ -38,7 +38,7 @@ func TestAntigravityProviderSourceMethods(t *testing.T) {
 		"the plaintext transcript directory stays watched")
 	assert.Equal(t, filepath.Join(root, "conversations"), plan.Roots[2].Path)
 	assert.False(t, plan.Roots[2].Recursive)
-	assert.Equal(t, root, plan.Roots[3].Path)
+	assert.Equal(t, filepath.Clean(root), filepath.Clean(plan.Roots[3].Path))
 	assert.False(t, plan.Roots[3].Recursive)
 	assert.Equal(t, []string{"conversation_summaries.db", "conversation_summaries.db-wal"}, plan.Roots[3].IncludeGlobs)
 
@@ -211,7 +211,7 @@ func TestAntigravityCLIProviderSourceMethods(t *testing.T) {
 		"the CLI brain root does not read the IDE transcript directory")
 	assert.Equal(t, filepath.Join(root, "conversations"), plan.Roots[1].Path)
 	assert.False(t, plan.Roots[1].Recursive)
-	assert.Equal(t, root, plan.Roots[2].Path)
+	assert.Equal(t, filepath.Clean(root), filepath.Clean(plan.Roots[2].Path))
 	assert.False(t, plan.Roots[2].Recursive)
 	assert.Equal(t, []string{"history.jsonl"}, plan.Roots[2].IncludeGlobs)
 	assert.Equal(t, filepath.Join(root, "cache"), plan.Roots[3].Path)

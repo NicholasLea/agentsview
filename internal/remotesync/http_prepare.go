@@ -1086,6 +1086,11 @@ func (hs HTTPSync) prepareMirror(
 	}, nil
 }
 
+type antigravityTitleVerification struct {
+	Version int                                    `json:"version"`
+	States  map[string]parser.SQLiteContainerState `json:"states"`
+}
+
 func (p *PreparedHTTP) antigravityTitlesPending() (bool, error) {
 	if len(p.targets.Dirs[parser.AgentAntigravity]) == 0 || p.sync.DB.ArchiveContent().UsageOnly() {
 		return false, nil
@@ -1101,29 +1106,26 @@ func (p *PreparedHTTP) antigravityTitlesPending() (bool, error) {
 			current[store] = state
 		}
 	}
-	data, err := os.ReadFile(p.root + ".antigravity-titles.json")
-	if errors.Is(err, os.ErrNotExist) {
-		return len(current) > 0, nil
-	}
+	data, err := os.ReadFile(mirrorAntigravityTitlesPath(p.root))
 	if err != nil {
-		return false, fmt.Errorf("read applied Antigravity title states: %w", err)
+		return true, nil
 	}
-	var applied map[string]parser.SQLiteContainerState
-	if err := json.Unmarshal(data, &applied); err != nil {
-		return false, fmt.Errorf("decode applied Antigravity title states: %w", err)
+	var applied antigravityTitleVerification
+	if err := json.Unmarshal(data, &applied); err != nil || applied.Version != 1 {
+		return true, nil
 	}
-	return !maps.Equal(current, applied), nil
+	return !maps.Equal(current, applied.States), nil
 }
 
 func (p *PreparedHTTP) persistAntigravityTitleStates() error {
 	if len(p.targets.Dirs[parser.AgentAntigravity]) == 0 || p.sync.DB.ArchiveContent().UsageOnly() {
 		return nil
 	}
-	data, err := json.Marshal(p.mirrorImport.pending.antigravityTitleStates)
+	data, err := json.Marshal(antigravityTitleVerification{Version: 1, States: p.mirrorImport.pending.antigravityTitleStates})
 	if err != nil {
 		return err
 	}
-	if err := atomicfile.WriteFile(p.root+".antigravity-titles.json", data, atomicfile.WithPrivate()); err != nil {
+	if err := atomicfile.WriteFile(mirrorAntigravityTitlesPath(p.root), data, atomicfile.WithPrivate()); err != nil {
 		return fmt.Errorf("persist applied Antigravity title states: %w", err)
 	}
 	return nil

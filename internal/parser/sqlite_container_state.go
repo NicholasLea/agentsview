@@ -6,7 +6,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
+	"time"
 )
+
+// Matching SQLite markers can hide writes, so cached reads expire.
+const SQLiteContainerDigestVerifyInterval = 5 * time.Minute
 
 // SQLiteContainerState captures SQLite write markers for bounded freshness
 // reuse. A mismatch costs one redundant re-read; a false match hides a write,

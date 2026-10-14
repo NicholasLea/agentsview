@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // AntigravitySummariesDBName is the per-root store where Antigravity keeps
@@ -16,22 +17,23 @@ type antigravityTitleSnapshot struct {
 	state  SQLiteContainerState
 	titles map[string]string
 	err    error
+	readAt time.Time
 }
+
+var antigravityTitleNow = time.Now
 
 var antigravityTitleCache = struct {
 	sync.Mutex
 	stores map[string]antigravityTitleSnapshot
 }{stores: make(map[string]antigravityTitleSnapshot)}
 
-// AntigravityStoreTitles returns the titles saved in an Antigravity title
-// store, keyed by conversation ID. A NULL title has no entry; a blank one
-// clears the stored name. Reads are cached until the store's SQLite state
-// changes; fresh bypasses that cache.
+// Fresh reads bypass the bounded cache because matching markers can hide writes.
 func AntigravityStoreTitles(ctx context.Context, path string, fresh bool) (map[string]string, error) {
 	state, ok := StatSQLiteContainerState(path)
 	antigravityTitleCache.Lock()
 	defer antigravityTitleCache.Unlock()
-	if prior, cached := antigravityTitleCache.stores[path]; ok && cached && !fresh && prior.state == state {
+	now := antigravityTitleNow()
+	if prior, cached := antigravityTitleCache.stores[path]; ok && cached && !fresh && prior.state == state && now.Sub(prior.readAt) >= 0 && now.Sub(prior.readAt) < SQLiteContainerDigestVerifyInterval {
 		return prior.titles, prior.err
 	}
 	titles, err := readAntigravityTitles(ctx, path)
@@ -43,7 +45,7 @@ func AntigravityStoreTitles(ctx context.Context, path string, fresh bool) (map[s
 		if _, cached := antigravityTitleCache.stores[path]; !cached && len(antigravityTitleCache.stores) >= 16 {
 			clear(antigravityTitleCache.stores)
 		}
-		antigravityTitleCache.stores[path] = antigravityTitleSnapshot{state: state, titles: titles, err: err}
+		antigravityTitleCache.stores[path] = antigravityTitleSnapshot{state: state, titles: titles, err: err, readAt: now}
 	} else {
 		delete(antigravityTitleCache.stores, path)
 	}
