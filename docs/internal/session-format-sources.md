@@ -3629,7 +3629,9 @@ schemas keep their existing ordering behavior.
   title states; checkpointed renames
   with matching markers refresh on main-file or framed-WAL events, full sync,
   or after five minutes. Reader-created frameless WAL events cause no reread;
-  watcher failures retry only the affected title stores.
+  watcher failures retry only the affected title stores. HTTP snapshots ignore
+  frameless WAL timestamps; unrelated-provider deltas reuse applied mirror
+  title states without reading stores or querying their archived sessions.
 
 ## Antigravity CLI (`antigravity-cli`)
 

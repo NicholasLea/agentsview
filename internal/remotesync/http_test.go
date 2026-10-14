@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/agentsview/internal/config"
@@ -946,7 +947,8 @@ func newMirrorTestRemote(t *testing.T) *mirrorTestRemote {
 			if remote.manifestHTML {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				_, _ = w.Write([]byte(
-					"<!doctype html><html><body>spa</body></html>"))
+					"<!doctype html><html><body>spa</body></html>",
+				))
 				return
 			}
 			// Mirror the real handler: build the manifest from the
@@ -1040,7 +1042,8 @@ func (r *mirrorTestRemote) addWindsurfFileScopedAgent(t *testing.T) string {
 	require.NoError(t, err)
 	_, err = conn.ExecContext(t.Context(), `CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)`)
 	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(),
+	_, err = conn.ExecContext(
+		t.Context(),
 		`INSERT INTO ItemTable (key, value) VALUES (?, ?)`,
 		"workbench.panel.aichat.view.aichat.chatdata",
 		`{"version":1,"sessionId":"replay-session","requests":[{"requestId":"request-1","message":{"text":"Question"},"response":[{"value":"Imported reply"}],"timestamp":1710000000000}]}`,
@@ -1296,7 +1299,7 @@ func TestHTTPAntigravityAppliedStatesCoverMultipleRoots(t *testing.T) {
 		roots = append(roots, root)
 	}
 	dbtest.WriteAntigravityTitleTranscript(t, roots[0], "hello")
-	remote.targets.Dirs = map[parser.AgentType][]string{parser.AgentAntigravity: roots}
+	remote.targets.Dirs = map[parser.AgentType][]string{parser.AgentAntigravity: roots, parser.AgentClaude: {remote.dir}}
 	database, hs := newMirrorSync(t, remote, t.TempDir())
 	_, err := hs.Run(t.Context())
 	require.NoError(t, err)
@@ -1313,11 +1316,89 @@ func TestHTTPAntigravityAppliedStatesCoverMultipleRoots(t *testing.T) {
 	idle, err := hs.Run(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, SyncStats{}, idle)
+	remote.writeSession(t, "unrelated.jsonl", time.Now(), "unrelated provider")
+	var titleReads, archiveTitleReads atomic.Int64
+	ctx := parser.WithSharedContainerScanObserver(t.Context(), func() { titleReads.Add(1) })
+	reader := database.Reader().(interface {
+		Conn(context.Context) (*sql.Conn, error)
+	})
+	var conns []*sql.Conn
+	// Cover every archive reader so the import cannot bypass the query spy.
+	for range 4 {
+		conn, err := reader.Conn(t.Context())
+		require.NoError(t, err)
+		conns = append(conns, conn)
+		require.NoError(t, conn.Raw(func(raw any) error {
+			raw.(*sqlite3.SQLiteConn).RegisterAuthorizer(func(op int, table, column, _ string) int {
+				if op == sqlite3.SQLITE_READ && table == "sessions" && column == "session_name" {
+					archiveTitleReads.Add(1)
+				}
+				return sqlite3.SQLITE_OK
+			})
+			return nil
+		}))
+	}
+	for _, conn := range conns {
+		require.NoError(t, conn.Close())
+	}
+	delta, err := hs.Run(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, delta.FullReason)
+	assert.Equal(t, 1, delta.FilesProcessed)
+	assert.Zero(t, titleReads.Load())
+	assert.Equal(t, int64(1), archiveTitleReads.Load(), "the unrelated session has one name lookup; unchanged Antigravity stores add none")
+	remote.targets.Dirs[parser.AgentAntigravity] = roots[:1]
+	_, err = hs.Run(t.Context())
+	require.NoError(t, err)
+	idle, err = hs.Run(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, SyncStats{}, idle)
+}
+
+func TestHTTPAntigravityClosedWALWriterSkipsIdleArchives(t *testing.T) {
+	remote := newMirrorTestRemote(t)
+	remote.targets.Dirs = map[parser.AgentType][]string{parser.AgentAntigravity: {remote.dir}}
+	dbtest.WriteAntigravityTitleTranscript(t, remote.dir, "hello")
+	store := dbtest.SetAntigravityTitle(t, remote.dir, "Saved title")
+	writer, err := sql.Open("sqlite3", store)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	_, err = writer.ExecContext(t.Context(), "PRAGMA journal_mode = WAL")
+	require.NoError(t, err)
+	_, err = writer.ExecContext(t.Context(), "UPDATE conversation_summaries SET title = 'WAL title'")
+	require.NoError(t, err)
+	_, hs := newMirrorSync(t, remote, t.TempDir())
+	_, err = hs.Run(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	reader, err := sql.Open("sqlite3", sqliteReadOnlyDSN(store))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
+	var count int
+	require.NoError(t, reader.QueryRowContext(t.Context(), "SELECT count(*) FROM conversation_summaries").Scan(&count))
+	wal, err := os.Stat(store + "-wal")
+	require.NoError(t, err)
+	require.LessOrEqual(t, wal.Size(), int64(32))
+	// Reader WAL timestamps can advance without a writer changing any titles.
+	remote.onManifest = func() {
+		mtime := time.Now().Add(time.Second)
+		assert.NoError(t, os.Chtimes(store+"-wal", mtime, mtime))
+	}
+	_, err = hs.Run(t.Context())
+	require.NoError(t, err)
+	requests := len(remote.archiveRequests)
+	for range 3 {
+		idle, err := hs.Run(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, SyncStats{}, idle)
+		assert.Len(t, remote.archiveRequests, requests)
+	}
 }
 
 func TestHTTPUnchangedMirrorImportsIntoNewDatabaseGeneration(t *testing.T) {
 	remote := newMirrorTestRemote(t)
-	remote.writeSession(t, "session.jsonl",
+	remote.writeSession(
+		t, "session.jsonl",
 		time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC),
 		"generation refresh",
 	)
@@ -1353,7 +1434,8 @@ func TestHTTPMirrorJournalFlipFailureRetainsArmedWork(t *testing.T) {
 		time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC), "flip retry")
 	dataDir := t.TempDir()
 	database, hs := newMirrorSync(t, remote, dataDir)
-	require.NoError(t, database.ReplaceRemoteSkippedFiles(t.Context(),
+	require.NoError(t, database.ReplaceRemoteSkippedFiles(
+		t.Context(),
 		hs.Host, map[string]int64{remotePath: 1},
 	))
 	flipErr := errors.New("journal flip sentinel")
@@ -1586,7 +1668,8 @@ func TestHTTPExplicitFullReparsesEarlierRowsOfAppendedClaudeSession(t *testing.T
 	assert.Equal(t, FullImportExplicit, stats.FullReason)
 
 	var content string
-	require.NoError(t, database.Reader().QueryRow(t.Context(), `
+	require.NoError(t, database.Reader().QueryRow(
+		t.Context(), `
 		SELECT content FROM messages
 		WHERE session_id = 'devbox~session' AND ordinal = 0`,
 	).Scan(&content))
@@ -1993,7 +2076,8 @@ func TestHTTPExplicitFullForceParsesRetainedJournalFullImport(t *testing.T) {
 	} {
 		t.Run(string(journalReason), func(t *testing.T) {
 			remote := newMirrorTestRemote(t)
-			remote.writeSession(t, "session.jsonl",
+			remote.writeSession(
+				t, "session.jsonl",
 				time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC),
 				"explicit full with retained journal",
 			)
@@ -2331,7 +2415,8 @@ func TestHTTPLegacyExplicitFullReplacesAppendedSession(t *testing.T) {
 	assert.Equal(t, FullImportExplicit, stats.FullReason)
 
 	var content string
-	require.NoError(t, database.Reader().QueryRow(t.Context(), `
+	require.NoError(t, database.Reader().QueryRow(
+		t.Context(), `
 		SELECT content FROM messages
 		WHERE session_id = 'devbox~session' AND ordinal = 0`,
 	).Scan(&content))
@@ -3191,10 +3276,12 @@ func TestPrepareHTTPSyncClearsOnlySelectedHostCacheBeforeMirrorMutation(t *testi
 	require.NoError(t, err)
 	require.NoError(t, prepared.Close())
 
-	require.NoError(t, database.ReplaceRemoteSkippedFiles(t.Context(),
+	require.NoError(t, database.ReplaceRemoteSkippedFiles(
+		t.Context(),
 		"devbox", map[string]int64{changed: 101},
 	))
-	require.NoError(t, database.ReplaceRemoteSkippedFiles(t.Context(),
+	require.NoError(t, database.ReplaceRemoteSkippedFiles(
+		t.Context(),
 		"other-host", map[string]int64{"/remote/other.jsonl": 202},
 	))
 	remote.writeSession(t, "a.jsonl", base.Add(time.Second),
@@ -3242,10 +3329,12 @@ func TestPrepareHTTPSyncUnchangedPreservesSelectedHostCache(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, prepared.Close())
 
-	require.NoError(t, database.ReplaceRemoteSkippedFiles(t.Context(),
+	require.NoError(t, database.ReplaceRemoteSkippedFiles(
+		t.Context(),
 		"devbox", map[string]int64{path: 303},
 	))
-	require.NoError(t, database.ReplaceRemoteSkippedFiles(t.Context(),
+	require.NoError(t, database.ReplaceRemoteSkippedFiles(
+		t.Context(),
 		"other-host", map[string]int64{"/remote/other.jsonl": 304},
 	))
 	requests := len(remote.archiveRequests)
@@ -3303,10 +3392,12 @@ func TestPrepareHTTPSyncFailureCleansOwnedResources(t *testing.T) {
 		require.NoError(t, err)
 		remote.archiveBody = tarWithoutEndMarker(t, name, "partial mirror")
 		database, hs := newMirrorSync(t, remote, t.TempDir())
-		require.NoError(t, database.ReplaceRemoteSkippedFiles(t.Context(),
+		require.NoError(t, database.ReplaceRemoteSkippedFiles(
+			t.Context(),
 			"devbox", map[string]int64{path: 404},
 		))
-		require.NoError(t, database.ReplaceRemoteSkippedFiles(t.Context(),
+		require.NoError(t, database.ReplaceRemoteSkippedFiles(
+			t.Context(),
 			"other-host", map[string]int64{"/remote/other.jsonl": 505},
 		))
 
@@ -4148,7 +4239,8 @@ func TestPrepareHTTPSyncsCacheInvalidationFailureRetainsArmedJournal(t *testing.
 	require.NoError(t, err)
 	beforeInfo, err := os.Stat(local)
 	require.NoError(t, err)
-	require.NoError(t, database.ReplaceRemoteSkippedFiles(t.Context(),
+	require.NoError(t, database.ReplaceRemoteSkippedFiles(
+		t.Context(),
 		hs.Host, map[string]int64{path: beforeInfo.ModTime().UnixNano()},
 	))
 	requestsBefore := len(remote.archiveRequests)
@@ -4212,7 +4304,8 @@ func TestPrepareHTTPSyncSameMtimeSizeChangeRecoversAfterAbortedRebuild(t *testin
 	}
 	require.NotEmpty(t, changedSessionID)
 
-	require.NoError(t, database.ReplaceRemoteSkippedFiles(t.Context(),
+	require.NoError(t, database.ReplaceRemoteSkippedFiles(
+		t.Context(),
 		hs.Host, map[string]int64{changed: base.UnixNano()},
 	))
 	remote.writeSession(t, "changed.jsonl", base, "new")
@@ -4278,7 +4371,8 @@ func TestHTTPMirrorSameMtimeGrowingRewriteFullParses(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
-	assert.Equal(t, "replacement with a deliberately larger body",
+	assert.Equal(
+		t, "replacement with a deliberately larger body",
 		messages[0].Content,
 	)
 }
@@ -4316,7 +4410,8 @@ func TestHTTPMirrorBootstrapSameMtimeGrowingRewriteFullParses(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
-	assert.Equal(t, "replacement with a deliberately larger body",
+	assert.Equal(
+		t, "replacement with a deliberately larger body",
 		messages[0].Content,
 	)
 }
@@ -4368,7 +4463,8 @@ func TestHTTPMirrorInterruptedGrowingRewriteRetainsFullParse(t *testing.T) {
 			)
 			require.NoError(t, err)
 			require.Len(t, messages, 1)
-			assert.Equal(t, "replacement with a deliberately larger body",
+			assert.Equal(
+				t, "replacement with a deliberately larger body",
 				messages[0].Content,
 			)
 		})

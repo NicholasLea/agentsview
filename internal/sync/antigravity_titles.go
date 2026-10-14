@@ -91,6 +91,20 @@ func (e *Engine) SnapshotAntigravityTitleStates() map[string]parser.SQLiteContai
 	return states
 }
 
+// Mirror snapshots change only on extraction, so persisted states can seed a delta engine.
+func (e *Engine) InjectAntigravityTitleStates(states map[string]parser.SQLiteContainerState) {
+	e.syncMu.Lock()
+	defer e.syncMu.Unlock()
+	e.appliedAntigravityTitles = make(map[string]appliedAntigravityTitles, len(states))
+	now := time.Now()
+	for _, root := range e.sources().agentDirs[parser.AgentAntigravity] {
+		path := filepath.Join(root, parser.AntigravitySummariesDBName)
+		if state, ok := states[path]; ok {
+			e.appliedAntigravityTitles[path] = appliedAntigravityTitles{state: state, readAt: now}
+		}
+	}
+}
+
 func (e *Engine) recordAntigravityTitleUpdates(stats SyncStats) {
 	if stats.TitlesUpdated > 0 || stats.Failed > 0 {
 		e.mu.Lock()

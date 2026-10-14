@@ -1086,6 +1086,18 @@ type antigravityTitleVerification struct {
 	States  map[string]parser.SQLiteContainerState `json:"states"`
 }
 
+func loadAntigravityTitleVerification(root string) antigravityTitleVerification {
+	data, err := os.ReadFile(mirrorAntigravityTitlesPath(root))
+	if err != nil {
+		return antigravityTitleVerification{}
+	}
+	var applied antigravityTitleVerification
+	if json.Unmarshal(data, &applied) != nil || applied.Version != 1 {
+		return antigravityTitleVerification{}
+	}
+	return applied
+}
+
 func (p *PreparedHTTP) antigravityTitlesPending() (bool, error) {
 	if len(p.targets.Dirs[parser.AgentAntigravity]) == 0 || p.sync.DB.ArchiveContent().UsageOnly() {
 		return false, nil
@@ -1101,17 +1113,7 @@ func (p *PreparedHTTP) antigravityTitlesPending() (bool, error) {
 			current[store] = state
 		}
 	}
-	data, err := os.ReadFile(mirrorAntigravityTitlesPath(p.root))
-	if err != nil {
-		return true, nil //nolint:nilerr // Missing or unreadable title verification state keeps reconciliation pending.
-	}
-	var applied antigravityTitleVerification
-	if err := json.Unmarshal(data, &applied); err != nil {
-		return true, nil //nolint:nilerr // Malformed title verification state keeps reconciliation pending.
-	}
-	if applied.Version > 1 {
-		return true, nil
-	}
+	applied := loadAntigravityTitleVerification(p.root)
 	if applied.Version != 1 {
 		return true, nil
 	}

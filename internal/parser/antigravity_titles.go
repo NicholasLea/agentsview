@@ -62,6 +62,7 @@ func readAntigravityTitles(ctx context.Context, path string) (map[string]string,
 	if !IsRegularFile(path) {
 		return nil, nil
 	}
+	observeSharedContainerScan(ctx)
 	store, err := openSQLiteReadOnly(path, sqliteReadOptions{busyTimeoutMS: 3000})
 	if err != nil {
 		return nil, err

@@ -119,6 +119,9 @@ func sqliteSnapshotIdentity(ctx context.Context, path string) (int64, time.Time,
 func sqliteSnapshotModTime(stateDB string, modTime time.Time) time.Time {
 	for _, suffix := range []string{"-wal", "-journal"} {
 		info, err := os.Lstat(stateDB + suffix)
+		if err == nil && suffix == "-wal" && !parser.SQLiteWALInfoHasFrames(info) {
+			continue
+		}
 		if err == nil && info.Mode().IsRegular() && info.ModTime().After(modTime) {
 			modTime = info.ModTime()
 		}

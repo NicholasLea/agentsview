@@ -271,6 +271,10 @@ func (pending *PreparedDeltaImport) Execute(
 	engine := syncpkg.NewEngine(ctx, pending.database, pending.config)
 	defer engine.Close()
 	engine.InjectSkipCache(pending.cache)
+	if !pending.full {
+		applied := loadAntigravityTitleVerification(pending.layout.paths.root)
+		engine.InjectAntigravityTitleStates(applied.States)
+	}
 	processingStart := time.Now()
 	var engineStats syncpkg.SyncStats
 	var changedResult syncpkg.ChangedPathSyncResult
@@ -386,7 +390,8 @@ func (pending *PreparedDeltaImport) persistSkipCache(ctx context.Context,
 	current := remoteEngineSkipCache(engine, pending.layout.paths)
 	deletes, upserts := diffRemoteSkipCache(pending.remoteCache, current)
 	if database != pending.database {
-		merged, err := pending.database.LoadRemoteSkippedFiles(ctx,
+		merged, err := pending.database.LoadRemoteSkippedFiles(
+			ctx,
 			pending.layout.paths.host,
 		)
 		if err != nil {
@@ -396,14 +401,16 @@ func (pending *PreparedDeltaImport) persistSkipCache(ctx context.Context,
 			delete(merged, key)
 		}
 		maps.Copy(merged, upserts)
-		if err := database.ReplaceRemoteSkippedFiles(ctx,
+		if err := database.ReplaceRemoteSkippedFiles(
+			ctx,
 			pending.layout.paths.host, merged,
 		); err != nil {
 			return fmt.Errorf("save rebuilt skip cache: %w", err)
 		}
 		return nil
 	}
-	if err := pending.apply(ctx,
+	if err := pending.apply(
+		ctx,
 		pending.layout.paths.host, deletes, upserts,
 	); err != nil {
 		return fmt.Errorf("save scoped skip cache: %w", err)
@@ -416,7 +423,8 @@ func (pending *PreparedDeltaImport) persistRetrySafeSkipCache(ctx context.Contex
 	engine *syncpkg.Engine,
 ) error {
 	remoteCache := remoteRetrySafeEngineSkipCache(engine, pending.layout.paths)
-	if err := database.ReplaceRemoteSkippedFiles(ctx,
+	if err := database.ReplaceRemoteSkippedFiles(
+		ctx,
 		pending.layout.paths.host, remoteCache,
 	); err != nil {
 		return fmt.Errorf("save retry-safe skip cache: %w", err)
