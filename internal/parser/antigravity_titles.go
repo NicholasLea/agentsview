@@ -27,13 +27,27 @@ var antigravityTitleCache = struct {
 	stores map[string]antigravityTitleSnapshot
 }{stores: make(map[string]antigravityTitleSnapshot)}
 
-// Fresh reads bypass the bounded cache because matching markers can hide writes.
-func AntigravityStoreTitles(ctx context.Context, path string, fresh bool) (map[string]string, error) {
+func InvalidateAntigravityTitles(path string) {
+	antigravityTitleCache.Lock()
+	defer antigravityTitleCache.Unlock()
+	delete(antigravityTitleCache.stores, path)
+}
+
+// Only successful reads can settle a remote title backfill.
+func AntigravityTitleStoreState(path string) (SQLiteContainerState, bool) {
+	antigravityTitleCache.Lock()
+	defer antigravityTitleCache.Unlock()
+	snapshot, ok := antigravityTitleCache.stores[path]
+	return snapshot.state, ok && snapshot.err == nil
+}
+
+// Matching markers can hide writes, so cached titles expire.
+func AntigravityStoreTitles(ctx context.Context, path string) (map[string]string, error) {
 	state, ok := StatSQLiteContainerState(path)
 	antigravityTitleCache.Lock()
 	defer antigravityTitleCache.Unlock()
 	now := antigravityTitleNow()
-	if prior, cached := antigravityTitleCache.stores[path]; ok && cached && !fresh && prior.state == state && now.Sub(prior.readAt) >= 0 && now.Sub(prior.readAt) < SQLiteContainerDigestVerifyInterval {
+	if prior, cached := antigravityTitleCache.stores[path]; ok && cached && prior.state == state && now.Sub(prior.readAt) >= 0 && now.Sub(prior.readAt) < SQLiteContainerDigestVerifyInterval {
 		return prior.titles, prior.err
 	}
 	titles, err := readAntigravityTitles(ctx, path)
@@ -101,7 +115,7 @@ func AntigravitySessionRoot(path string) (string, bool) {
 // unreadable store or missing entry leaves no title signal, so the stored
 // name survives the write.
 func applyAntigravityTitle(ctx context.Context, sess *ParsedSession, src antigravitySource) {
-	titles, err := AntigravityStoreTitles(ctx, filepath.Join(src.Root, AntigravitySummariesDBName), false)
+	titles, err := AntigravityStoreTitles(ctx, filepath.Join(src.Root, AntigravitySummariesDBName))
 	if err != nil {
 		return
 	}

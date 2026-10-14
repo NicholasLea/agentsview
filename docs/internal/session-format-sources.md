@@ -3618,8 +3618,10 @@ schemas keep their existing ordering behavior.
   records `conversation_summaries.db` under `~/.gemini/antigravity/` and
   `~/.gemini/antigravity-ide/`. The [contributor confirmed Antigravity 2.22.0 on macOS](https://github.com/kenn-io/agentsview/pull/2190#issuecomment-6120251760)
   uses `~/.gemini/antigravity/conversation_summaries.db` with
-  `conversation_summaries(conversation_id PRIMARY KEY, title, ...)`. Titles
-  stay out of the transcript fingerprint: parsing copies the saved title, and
+  `conversation_summaries(conversation_id PRIMARY KEY, title, ...)` in the desktop
+  app. The IDE root is read the same way but remains unconfirmed;
+  `antigravity-cli` has no known title store. Titles stay out of the transcript
+  fingerprint: parsing copies the saved title, and
   each sync pass copies changed titles onto stored sessions, including those
   whose transcript is gone. A NULL title or unreadable store keeps the stored
   title; a blank title clears it. Rechecked 2026-10-13 with synthetic stores:

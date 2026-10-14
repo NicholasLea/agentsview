@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"log"
 	"maps"
 	"path/filepath"
@@ -13,70 +14,69 @@ import (
 	"go.kenn.io/agentsview/internal/parser"
 )
 
-type antigravityTitleState struct {
-	state  parser.SQLiteContainerState
-	readAt time.Time
-}
-
-func (e *Engine) invalidateAntigravityTitleStates(paths []string) {
+func (e *Engine) invalidateAntigravityTitleCache(paths []string) {
+	if paths == nil {
+		for _, root := range e.sources().agentDirs[parser.AgentAntigravity] {
+			parser.InvalidateAntigravityTitles(filepath.Join(root, parser.AntigravitySummariesDBName))
+		}
+	}
 	for _, path := range paths {
-		delete(e.antigravityTitleStates, strings.TrimSuffix(filepath.Clean(path), "-wal"))
+		parser.InvalidateAntigravityTitles(strings.TrimSuffix(filepath.Clean(path), "-wal"))
 	}
 }
 
-// The caller holds syncMu and reconciles after parsing so an older parsed title cannot win.
-func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, fresh bool) int {
+// Reconcile after parsing so an older parsed title cannot win.
+func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, stats *SyncStats) error {
 	sources := e.sources()
-	if _, enabled := sources.providerFactories[parser.AgentAntigravity]; !enabled ||
-		e.db.ArchiveContent().UsageOnly() {
-		return 0
+	if _, enabled := sources.providerFactories[parser.AgentAntigravity]; !enabled || e.db.ArchiveContent().UsageOnly() {
+		return nil
 	}
-	updated := 0
+	var writeErr error
 	for _, root := range sources.agentDirs[parser.AgentAntigravity] {
 		if ctx.Err() != nil {
-			return updated
+			return errors.Join(writeErr, ctx.Err())
 		}
 		store := filepath.Join(root, parser.AntigravitySummariesDBName)
-		state, ok := parser.StatSQLiteContainerState(store)
-		if !ok {
-			continue
-		}
-		now := openCodeContainerDigestVerifyNow()
-		if prior, seen := e.antigravityTitleStates[store]; !fresh && seen && prior.state == state && now.Sub(prior.readAt) >= 0 && now.Sub(prior.readAt) < openCodeContainerDigestVerifyInterval {
-			continue
-		}
-		titles, err := parser.AntigravityStoreTitles(ctx, store, true)
+		titles, err := parser.AntigravityStoreTitles(ctx, store)
 		if err != nil {
 			if ctx.Err() != nil {
-				return updated
+				return errors.Join(writeErr, ctx.Err())
 			}
 			log.Printf("antigravity titles %s: %v", store, err)
-		} else {
-			n, err := e.applyAntigravityStoreTitles(ctx, root, titles)
-			updated += n
-			if err != nil {
-				delete(e.antigravityTitleStates, store)
-				log.Printf("antigravity titles %s: %v", store, err)
-				continue
-			}
+			continue
 		}
-		if e.antigravityTitleStates == nil {
-			e.antigravityTitleStates = make(map[string]antigravityTitleState)
+		n, err := e.applyAntigravityStoreTitles(ctx, root, titles)
+		stats.TitlesUpdated += n
+		if err != nil {
+			stats.RecordFailed()
+			parser.InvalidateAntigravityTitles(store)
+			writeErr = errors.Join(writeErr, err)
+			log.Printf("antigravity titles %s: %v", store, err)
 		}
-		e.antigravityTitleStates[store] = antigravityTitleState{state: state, readAt: now}
 	}
-	return updated
+	return writeErr
 }
 
-// Unreadable stores settle too; archive write failures remain pending for retry.
 func (e *Engine) SnapshotAntigravityTitleStates() map[string]parser.SQLiteContainerState {
 	e.syncMu.Lock()
 	defer e.syncMu.Unlock()
-	states := make(map[string]parser.SQLiteContainerState, len(e.antigravityTitleStates))
-	for path, prior := range e.antigravityTitleStates {
-		states[path] = prior.state
+	states := make(map[string]parser.SQLiteContainerState)
+	for _, root := range e.sources().agentDirs[parser.AgentAntigravity] {
+		path := filepath.Join(root, parser.AntigravitySummariesDBName)
+		if state, ok := parser.AntigravityTitleStoreState(path); ok {
+			states[path] = state
+		}
 	}
 	return states
+}
+
+func (e *Engine) recordAntigravityTitleUpdates(stats SyncStats) {
+	if stats.TitlesUpdated > 0 && stats.ProcessingComplete() {
+		e.mu.Lock()
+		e.lastSync = time.Now()
+		e.lastSyncStats.TitlesUpdated += stats.TitlesUpdated
+		e.mu.Unlock()
+	}
 }
 
 func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root string, titles map[string]string) (updated int, err error) {

@@ -658,8 +658,6 @@ type Engine struct {
 	completeSourceMirror    bool
 	emitter                 Emitter
 	providerMigrationModes  map[parser.AgentType]parser.ProviderMigrationMode
-	// Guarded by syncMu so failed reads and completed writes share a bounded retry window.
-	antigravityTitleStates map[string]antigravityTitleState
 
 	providerWatchRootsMu    gosync.Mutex
 	providerWatchRoots      map[parser.AgentType][]parser.WatchRoot
@@ -1818,16 +1816,15 @@ func (e *Engine) syncChangedPathsLocked(
 	})
 	ctx = parser.WithProjectRootMemo(ctx)
 	ctx = parser.WithCodexParentInventoryBatch(ctx)
-	e.invalidateAntigravityTitleStates(paths)
+	e.invalidateAntigravityTitleCache(paths)
 	stats, tombstoned, err := e.applyChangedPathSyncLocked(
 		ctx, e.prepareChangedPathSync(ctx, paths),
 	)
 	// Title store events carry no session files, so this also handles them.
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, false)
-	e.mu.Lock()
-	e.lastSync = time.Now()
-	e.lastSyncStats = stats
-	e.mu.Unlock()
+	if err == nil && !stats.Aborted {
+		err = e.reconcileAntigravityTitlesLocked(ctx, &stats)
+		e.recordAntigravityTitleUpdates(stats)
+	}
 	return stats, tombstoned, err
 }
 
@@ -2960,8 +2957,6 @@ func (e *Engine) resyncAllWithOptionsLocked(
 		return stats, err
 	}
 	ops = ops.withDefaults()
-	// Title states applied to the replacement do not describe a discarded build.
-	defer func() { e.antigravityTitleStates = nil }()
 
 	// Hold the write barrier for the whole in-process build-and-swap window. The
 	// build reads the original while it stays open, and the swap's
@@ -3715,8 +3710,8 @@ func (e *Engine) resyncBuildLocked(
 	copiedSessionIDs = append(copiedSessionIDs, orphaned...)
 	for id, name := range deferredTitles {
 		if err := newDB.RefreshNativeSessionName(ctx, id, name); err != nil {
+			stats.RecordFailed()
 			stats.Aborted = true
-			e.antigravityTitleStates = nil
 			newDB.Close()
 			removeTempDB(tempPath)
 			restoreSkipCache()
@@ -4230,8 +4225,6 @@ func (e *Engine) SwapResyncDatabase(
 // the next sync, never persisted). The caller invokes it immediately after a
 // successful SwapResyncDatabase.
 func (e *Engine) ResetCachesAfterSwap(ctx context.Context) error {
-	// Orphan copies can carry titles older than the stores' applied states.
-	e.antigravityTitleStates = nil
 	e.clearTrustedSQLiteContainers()
 	e.clearTrustedOpenCodeStorageSessions()
 	e.clearVerifiedSources()
@@ -5737,7 +5730,7 @@ func (e *Engine) reconcileWatchRootsStreamedLocked(
 		}
 	}
 	// Recovery passes also catch title store events the watcher missed.
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, false)
+	retErr = errors.Join(retErr, e.reconcileAntigravityTitlesLocked(ctx, &stats))
 	canTombstoneCompletedScopes :=
 		retErr == nil && (failures > 0 || stats.Deferred > 0) &&
 			stats.Failed == 0 && !stats.Aborted
@@ -7993,6 +7986,7 @@ func (e *Engine) syncAllLocked(
 	if ctx.Err() != nil {
 		return SyncStats{Aborted: true}
 	}
+	e.invalidateAntigravityTitleCache(nil)
 	ctx = e.parsePolicyContext(ctx)
 	ctx = parser.WithProjectRootMemo(ctx)
 	ctx = parser.WithCodexParentInventoryBatch(ctx)
@@ -8287,7 +8281,7 @@ func (e *Engine) syncAllLocked(
 	} else {
 		stats.RecordLinksUpdated(linked)
 	}
-	stats.TitlesUpdated += e.reconcileAntigravityTitlesLocked(ctx, true)
+	_ = e.reconcileAntigravityTitlesLocked(ctx, &stats)
 
 	e.reportFinalizingProgress(
 		onProgress, writeMode, finalizingSkipCacheDetail,

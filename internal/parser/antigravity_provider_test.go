@@ -75,6 +75,11 @@ func TestAntigravityProviderFingerprintAndParse(t *testing.T) {
 	id := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	dbPath := filepath.Join(root, "conversations", id+".db")
 	writeAntigravityIDEProviderFixture(t, root, id)
+	titles, err := sql.Open("sqlite3", filepath.Join(root, AntigravitySummariesDBName))
+	require.NoError(t, err)
+	_, err = titles.Exec(`CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT); INSERT INTO conversation_summaries VALUES (?, 'Database conversation')`, id)
+	require.NoError(t, err)
+	require.NoError(t, titles.Close())
 
 	provider, ok := NewProvider(AgentAntigravity, ProviderConfig{
 		Roots:   []string{root},
@@ -114,6 +119,8 @@ func TestAntigravityProviderFingerprintAndParse(t *testing.T) {
 	assert.Equal(t, "devbox", result.Result.Session.Machine)
 	assert.Equal(t, after.Hash, result.Result.Session.File.Hash)
 	assert.Len(t, result.Result.Messages, 3)
+	assert.Equal(t, "Database conversation", result.Result.Session.SessionName)
+	assert.True(t, result.Result.Session.SessionNamePresent)
 }
 
 func TestAntigravityProviderStoredPathFreshness(t *testing.T) {

@@ -1184,7 +1184,7 @@ func TestHTTPUnchangedMirrorBackfillsAntigravityTitles(t *testing.T) {
 	assert.Equal(t, SyncStats{}, third)
 	assert.Zero(t, journalWrites)
 	assert.Len(t, remote.archiveRequests, requests)
-	for _, data := range []string{"{", "{}", `{"version":2,"states":{}}`} {
+	for _, data := range []string{"{", "{}"} {
 		require.NoError(t, os.WriteFile(sidecar, []byte(data), 0o600))
 		require.NoError(t, database.RefreshNativeSessionName(t.Context(), sessionID, nil))
 		backfill, err := hs.Run(t.Context())
@@ -1203,7 +1203,20 @@ func TestHTTPUnchangedMirrorBackfillsAntigravityTitles(t *testing.T) {
 		assert.Equal(t, SyncStats{}, idle)
 	}
 
+	newer := []byte(`{"version":2,"states":{}}`)
+	require.NoError(t, os.WriteFile(sidecar, newer, 0o600))
+	_, err = hs.Run(t.Context())
+	require.ErrorContains(t, err, "unsupported Antigravity title verification version 2")
+	unchanged, err := os.ReadFile(sidecar)
+	require.NoError(t, err)
+	assert.Equal(t, newer, unchanged)
 	dbtest.SetAntigravityTitle(t, remote.dir, "Later title")
+	_, err = hs.Run(t.Context())
+	require.ErrorContains(t, err, "unsupported Antigravity title verification version 2")
+	unchanged, err = os.ReadFile(sidecar)
+	require.NoError(t, err)
+	assert.Equal(t, newer, unchanged)
+	require.NoError(t, os.Remove(sidecar))
 	fourth, err := hs.Run(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, 1, fourth.SessionsSynced)
@@ -1214,7 +1227,35 @@ func TestHTTPUnchangedMirrorBackfillsAntigravityTitles(t *testing.T) {
 	assert.Equal(t, before.TranscriptRevision, after.TranscriptRevision)
 }
 
-func TestHTTPUnchangedMirrorSettlesUnreadableAntigravityTitles(t *testing.T) {
+func TestHTTPUnchangedMirrorAntigravityVerificationWriteFailure(t *testing.T) {
+	remote := newMirrorTestRemote(t)
+	remote.targets.Dirs = map[parser.AgentType][]string{parser.AgentAntigravity: {remote.dir}}
+	dbtest.WriteAntigravityTitleTranscript(t, remote.dir, "hello")
+	dbtest.SetAntigravityTitle(t, remote.dir, "Saved title")
+	database, hs := newMirrorSync(t, remote, t.TempDir())
+	_, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	const id = "devbox~antigravity:" + dbtest.AntigravityTitleID
+	require.NoError(t, database.RefreshNativeSessionName(t.Context(), id, nil))
+	sidecar := mirrorAntigravityTitlesPath(MirrorDir(hs.DataDir, hs.Host))
+	require.NoError(t, os.Remove(sidecar))
+	require.NoError(t, os.Mkdir(sidecar, 0o700))
+	stats, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 1, stats.SessionsSynced)
+	assert.Equal(t, JournalRetired, stats.JournalOutcome)
+	session, err := database.GetSessionFull(t.Context(), id)
+	require.NoError(t, err)
+	assert.Equal(t, new("Saved title"), session.SessionName)
+	require.NoError(t, os.Remove(sidecar))
+	_, err = hs.Run(t.Context())
+	require.NoError(t, err)
+	idle, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, SyncStats{}, idle)
+}
+
+func TestHTTPUnchangedMirrorRetriesUnreadableAntigravityTitles(t *testing.T) {
 	remote := newMirrorTestRemote(t)
 	remote.targets.Dirs = map[parser.AgentType][]string{parser.AgentAntigravity: {remote.dir}}
 	dbtest.WriteAntigravityTitleTranscript(t, remote.dir, "hello")
@@ -1242,12 +1283,32 @@ func TestHTTPUnchangedMirrorSettlesUnreadableAntigravityTitles(t *testing.T) {
 	}
 	idle, err := hs.Run(t.Context())
 	require.NoError(t, err)
-	assert.Equal(t, SyncStats{}, idle)
-	assert.Zero(t, journalWrites)
+	assert.Equal(t, 0, idle.SessionsSynced)
+	assert.Positive(t, journalWrites)
 	assert.Len(t, remote.archiveRequests, requests)
 	session, err := database.GetSessionFull(t.Context(), "devbox~antigravity:"+dbtest.AntigravityTitleID)
 	require.NoError(t, err)
 	assert.Equal(t, new("Saved title"), session.SessionName)
+	require.NoError(t, database.RefreshNativeSessionName(t.Context(), session.ID, nil))
+	mirrorStore, err := safeRemappedRemotePath(MirrorDir(hs.DataDir, hs.Host), store)
+	require.NoError(t, err)
+	info, err := os.Stat(mirrorStore)
+	require.NoError(t, err)
+	conn, err = sql.Open("sqlite3", mirrorStore)
+	require.NoError(t, err)
+	_, err = conn.Exec("ALTER TABLE unreadable_summaries RENAME TO conversation_summaries")
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+	require.NoError(t, os.Chtimes(mirrorStore, info.ModTime(), info.ModTime()))
+	retried, err := hs.Run(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 1, retried.SessionsSynced)
+	session, err = database.GetSessionFull(t.Context(), session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, new("Saved title"), session.SessionName)
+	idle, err = hs.Run(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, SyncStats{}, idle)
 }
 
 func TestHTTPUnchangedMirrorImportsIntoNewDatabaseGeneration(t *testing.T) {

@@ -30,7 +30,7 @@ func TestAntigravityTitleCacheExpiresMatchingMarkers(t *testing.T) {
 		}
 	}
 	checkpoint()
-	titles, err := AntigravityStoreTitles(t.Context(), store, false)
+	titles, err := AntigravityStoreTitles(t.Context(), store)
 	require.NoError(t, err)
 	require.Equal(t, "First", titles["conversation-a"])
 	before, ok := StatSQLiteContainerState(store)
@@ -41,11 +41,11 @@ func TestAntigravityTitleCacheExpiresMatchingMarkers(t *testing.T) {
 	after, ok := StatSQLiteContainerState(store)
 	require.True(t, ok)
 	require.Equal(t, before, after)
-	titles, err = AntigravityStoreTitles(t.Context(), store, false)
+	titles, err = AntigravityStoreTitles(t.Context(), store)
 	require.NoError(t, err)
 	assert.Equal(t, "First", titles["conversation-a"])
 	now = now.Add(SQLiteContainerDigestVerifyInterval)
-	titles, err = AntigravityStoreTitles(t.Context(), store, false)
+	titles, err = AntigravityStoreTitles(t.Context(), store)
 	require.NoError(t, err)
 	assert.Equal(t, "Later", titles["conversation-a"])
 }

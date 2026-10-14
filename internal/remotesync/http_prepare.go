@@ -441,10 +441,7 @@ func (p *PreparedHTTP) ImportActive(ctx context.Context) (SyncStats, error) {
 	}
 	retireStart := time.Now()
 	if err := p.persistAntigravityTitleStates(); err != nil {
-		stats.JournalOutcome = JournalCachePersistFailed
-		p.mirrorImport.outcome = stats.JournalOutcome
-		p.reportDeltaImport(stats)
-		return stats, err
+		log.Printf("Antigravity title verification: %v", err)
 	}
 	if err := p.retireJournal(p.mirrorImport.journalPath); err != nil {
 		stats.RetirementDuration = time.Since(retireStart)
@@ -612,7 +609,7 @@ func (p *PreparedHTTP) Commit() error {
 	}
 	start := time.Now()
 	if err := p.persistAntigravityTitleStates(); err != nil {
-		return err
+		log.Printf("Antigravity title verification: %v", err)
 	}
 	if err := p.retireJournal(p.mirrorImport.journalPath); err != nil {
 		p.mirrorImport.pending.Stats.RetirementDuration = time.Since(start)
@@ -993,14 +990,12 @@ func (hs HTTPSync) prepareMirror(
 	}
 	hasPending := journal.FullImport || journal.RequiredDataVersion != 0 ||
 		len(journal.Entries) > 0 || fullReason != "" || hs.Full
-	if !mutatesMirror && !hasPending {
-		pendingTitles, err := prepared.antigravityTitlesPending()
-		if err != nil {
-			return nil, err
-		}
-		if !pendingTitles {
-			return nil, nil
-		}
+	pendingTitles, err := prepared.antigravityTitlesPending()
+	if err != nil {
+		return nil, err
+	}
+	if !mutatesMirror && !hasPending && !pendingTitles {
+		return nil, nil
 	}
 	if err := prepared.replaceJournal(journalPath, journal); err != nil {
 		return nil, fmt.Errorf("persist pending mirror changes: %w", err)
@@ -1111,7 +1106,13 @@ func (p *PreparedHTTP) antigravityTitlesPending() (bool, error) {
 		return true, nil
 	}
 	var applied antigravityTitleVerification
-	if err := json.Unmarshal(data, &applied); err != nil || applied.Version != 1 {
+	if err := json.Unmarshal(data, &applied); err != nil {
+		return true, nil
+	}
+	if applied.Version > 1 {
+		return false, fmt.Errorf("unsupported Antigravity title verification version %d", applied.Version)
+	}
+	if applied.Version != 1 {
 		return true, nil
 	}
 	return !maps.Equal(current, applied.States), nil
