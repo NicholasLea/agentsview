@@ -4224,6 +4224,7 @@ const sessionMachineBatchSize = 500
 type SessionWriteIdentity struct {
 	Machine     string
 	Agent       string
+	Cwd         string
 	FilePath    string
 	FileHash    string
 	SessionName *string
@@ -4263,7 +4264,7 @@ func (db *DB) ListSessionWriteIdentitiesByID(
 				args[i] = id
 			}
 			rows, err := db.getReader().QueryContext(ctx, `
-			SELECT id, machine, agent,
+			SELECT id, machine, agent, COALESCE(cwd, ''),
 			       COALESCE(file_path, ''), COALESCE(file_hash, ''),
 			       session_name
 			FROM sessions
@@ -4277,7 +4278,7 @@ func (db *DB) ListSessionWriteIdentitiesByID(
 				var id string
 				var identity SessionWriteIdentity
 				if err := rows.Scan(
-					&id, &identity.Machine, &identity.Agent,
+					&id, &identity.Machine, &identity.Agent, &identity.Cwd,
 					&identity.FilePath, &identity.FileHash, &identity.SessionName,
 				); err != nil {
 					_ = rows.Close()

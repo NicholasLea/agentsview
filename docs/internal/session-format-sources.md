@@ -3632,6 +3632,8 @@ schemas keep their existing ordering behavior.
   watcher failures retry only the affected title stores. HTTP snapshots ignore
   frameless WAL timestamps; unrelated-provider deltas reuse applied mirror
   title states without reading stores or querying their archived sessions.
+  Title renames respect the archived session's working-directory filter during
+  sync and rebuilds, rechecked with synthetic stores on 2026-10-13.
 
 ## Antigravity CLI (`antigravity-cli`)
 

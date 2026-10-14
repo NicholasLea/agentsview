@@ -152,7 +152,7 @@ func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root string, t
 			session.SessionName == nil && title == "" {
 			continue
 		}
-		if !e.antigravityRootOwns(root, session.FilePath) {
+		if !e.antigravityRootOwns(root, session.FilePath) || !e.cwdFilter.allows(session.Cwd) {
 			continue
 		}
 		var name *string

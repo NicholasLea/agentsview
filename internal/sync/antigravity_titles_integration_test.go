@@ -2,6 +2,7 @@ package sync_test
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -175,6 +176,48 @@ func TestAntigravityRebuildKeepsRenamesOfSessionsWithoutTranscript(t *testing.T)
 	dbtest.SetAntigravityTitle(t, root, "Later")
 	engine.ResyncAll(t.Context(), nil)
 	assert.Equal(t, new("Later"), antigravityStoredTitle(t, archive), "orphan copies must not restore an older title")
+}
+
+func TestAntigravityTitleRenamesRespectCwdFilter(t *testing.T) {
+	for _, mode := range []string{"applied", "rebuild"} {
+		for _, tc := range []struct {
+			name string
+			want string
+		}{
+			{name: "excluded", want: "First"},
+			{name: "allowed", want: "Later"},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				root, claudeRoot, workspace := t.TempDir(), t.TempDir(), t.TempDir()
+				transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
+				store := dbtest.SetAntigravityTitle(t, root, "First")
+				archive := dbtest.OpenTestDB(t)
+				require.NoError(t, newAntigravityTitleEngine(t, archive, root).SyncPathsContext(t.Context(), []string{transcript}))
+				require.NoError(t, archive.UpdateSessionCwd(t.Context(), "antigravity:"+dbtest.AntigravityTitleID, filepath.Join(workspace, tc.name)))
+				allowed := filepath.Join(workspace, "allowed")
+				engine := sync.NewEngine(t.Context(), archive, sync.EngineConfig{
+					AgentDirs: map[parser.AgentType][]string{
+						parser.AgentAntigravity: {root}, parser.AgentClaude: {claudeRoot},
+					},
+					Machine: "host-a", IncludeCwdPrefixes: []string{allowed},
+				})
+				if mode == "rebuild" {
+					require.NoError(t, os.RemoveAll(filepath.Join(root, "brain")))
+					dbtest.WriteTestFile(t, filepath.Join(claudeRoot, "project", "live.jsonl"), []byte(fmt.Sprintf(
+						`{"type":"user","timestamp":"2026-01-01T10:00:00Z","sessionId":"live","cwd":%q,"message":{"role":"user","content":"hello"}}`+"\n", allowed)))
+				}
+				dbtest.SetAntigravityTitle(t, root, "Later")
+				if mode == "rebuild" {
+					stats := engine.ResyncAll(t.Context(), nil)
+					require.False(t, stats.Aborted)
+					require.Equal(t, 1, stats.Synced)
+				} else {
+					require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
+				}
+				assert.Equal(t, new(tc.want), antigravityStoredTitle(t, archive))
+			})
+		}
+	}
 }
 
 func TestAntigravityTrashedSessionRestoresWithCurrentTitle(t *testing.T) {
