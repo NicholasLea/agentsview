@@ -1244,7 +1244,7 @@ func TestHTTPUnchangedMirrorBackfillsAntigravityTitles(t *testing.T) {
 			case "unreadable titles":
 				conn, err := sql.Open("sqlite3", store)
 				require.NoError(t, err)
-				_, err = conn.Exec("ALTER TABLE conversation_summaries RENAME TO unreadable_summaries")
+				_, err = conn.ExecContext(t.Context(), "ALTER TABLE conversation_summaries RENAME TO unreadable_summaries")
 				require.NoError(t, err)
 				require.NoError(t, conn.Close())
 				unreadable, err := hs.Run(t.Context())
@@ -1265,7 +1265,7 @@ func TestHTTPUnchangedMirrorBackfillsAntigravityTitles(t *testing.T) {
 				require.NoError(t, err)
 				conn, err = sql.Open("sqlite3", mirrorStore)
 				require.NoError(t, err)
-				_, err = conn.Exec("ALTER TABLE unreadable_summaries RENAME TO conversation_summaries")
+				_, err = conn.ExecContext(t.Context(), "ALTER TABLE unreadable_summaries RENAME TO conversation_summaries")
 				require.NoError(t, err)
 				require.NoError(t, conn.Close())
 				require.NoError(t, os.Chtimes(mirrorStore, info.ModTime(), info.ModTime()))

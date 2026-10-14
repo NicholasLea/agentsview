@@ -104,7 +104,7 @@ func TestAntigravityTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
 				raw, err := sql.Open("sqlite3", failurePath)
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, raw.Close()) })
-				_, err = raw.Exec(inject)
+				_, err = raw.ExecContext(t.Context(), inject)
 				require.NoError(t, err)
 				spy := &antigravityTitleQuerySpy{Store: archive, reader: archive}
 				engine.archiveStore = spy
@@ -153,7 +153,7 @@ func TestAntigravityTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
 				var missing sql.NullString
 				require.NoError(t, archive.Reader().QueryRow(t.Context(), "SELECT source_missing_at FROM sessions WHERE id = 'missing'").Scan(&missing))
 				assert.True(t, missing.Valid, "title failures preserve other agents' deletion proof")
-				_, err = raw.Exec(repair)
+				_, err = raw.ExecContext(t.Context(), repair)
 				require.NoError(t, err)
 				if mode == "watcher" || mode == "watcher-read" {
 					time.Sleep(20 * time.Millisecond)
@@ -187,10 +187,10 @@ func TestAntigravityMatchingMarkersExpireOrRefreshOnRequest(t *testing.T) {
 				conn, err := sql.Open("sqlite3", store)
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, conn.Close()) })
-				_, err = conn.Exec("PRAGMA journal_mode=WAL; UPDATE conversation_summaries SET title = 'First'")
+				_, err = conn.ExecContext(t.Context(), "PRAGMA journal_mode=WAL; UPDATE conversation_summaries SET title = 'First'")
 				require.NoError(t, err)
 				checkpoint := func() {
-					_, err := conn.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+					_, err := conn.ExecContext(t.Context(), "PRAGMA wal_checkpoint(TRUNCATE)")
 					require.NoError(t, err)
 					for _, path := range []string{store, store + "-wal"} {
 						require.NoError(t, os.Chtimes(path, now, now))
@@ -203,7 +203,7 @@ func TestAntigravityMatchingMarkersExpireOrRefreshOnRequest(t *testing.T) {
 				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 				before, ok := parser.StatSQLiteContainerState(store)
 				require.True(t, ok)
-				_, err = conn.Exec("UPDATE conversation_summaries SET title = 'Later'")
+				_, err = conn.ExecContext(t.Context(), "UPDATE conversation_summaries SET title = 'Later'")
 				require.NoError(t, err)
 				checkpoint()
 				after, ok := parser.StatSQLiteContainerState(store)

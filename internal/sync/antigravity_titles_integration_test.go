@@ -120,7 +120,7 @@ func TestAntigravityUnreadableTitleStoreKeepsTitle(t *testing.T) {
 				incompatible := filepath.Join(t.TempDir(), parser.AntigravitySummariesDBName)
 				conn, err := sql.Open("sqlite3", incompatible)
 				require.NoError(t, err)
-				_, err = conn.Exec(schema)
+				_, err = conn.ExecContext(t.Context(), schema)
 				require.NoError(t, err)
 				require.NoError(t, conn.Close())
 				data, err = os.ReadFile(incompatible)

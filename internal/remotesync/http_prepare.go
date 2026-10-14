@@ -1103,11 +1103,11 @@ func (p *PreparedHTTP) antigravityTitlesPending() (bool, error) {
 	}
 	data, err := os.ReadFile(mirrorAntigravityTitlesPath(p.root))
 	if err != nil {
-		return true, nil
+		return true, nil //nolint:nilerr // Missing or unreadable title verification state keeps reconciliation pending.
 	}
 	var applied antigravityTitleVerification
 	if err := json.Unmarshal(data, &applied); err != nil {
-		return true, nil
+		return true, nil //nolint:nilerr // Malformed title verification state keeps reconciliation pending.
 	}
 	if applied.Version > 1 {
 		return true, nil

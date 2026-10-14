@@ -78,9 +78,9 @@ func TestAntigravityProviderFingerprintAndParse(t *testing.T) {
 	writeAntigravityIDEProviderFixture(t, root, id)
 	titles, err := sql.Open("sqlite3", filepath.Join(root, AntigravitySummariesDBName))
 	require.NoError(t, err)
-	_, err = titles.Exec(testjsonl.AntigravityTitleSchema)
+	_, err = titles.ExecContext(t.Context(), testjsonl.AntigravityTitleSchema)
 	require.NoError(t, err)
-	_, err = titles.Exec(`INSERT INTO conversation_summaries VALUES (?, 'Database conversation')`, id)
+	_, err = titles.ExecContext(t.Context(), `INSERT INTO conversation_summaries VALUES (?, 'Database conversation')`, id)
 	require.NoError(t, err)
 	require.NoError(t, titles.Close())
 
