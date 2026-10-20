@@ -139,10 +139,12 @@ func qoderSessionTitleID(path string) string {
 	return stem
 }
 
-// applyQoderTitles sets titles from the root's application database. An
-// unreadable database or a missing entry leaves no title signal, so the stored
-// name survives the write. Only the session the transcript is named for is
-// titled; forks parsed from the same file keep their own identity.
+// applyQoderTitles takes titles from the root's application database, which
+// outranks every other source for a session it holds a row for. An unreadable
+// database, a missing row, or a row with a blank title reports no signal, so
+// the stored name survives the write instead of being replaced by an older
+// export snapshot. Only the session the transcript is named for is titled;
+// forks parsed from the same file keep their own identity.
 func applyQoderTitles(ctx context.Context, results []ParseResult, path string) {
 	root, ok := QoderSessionRoot(path)
 	if !ok {
@@ -158,6 +160,8 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path string) {
 	}
 	titles, _, err := QoderStoreTitles(ctx, store)
 	if err != nil {
+		// A store that cannot be read supplies no signal, so the pass that
+		// read it can restore the title later. Reconciliation retries it.
 		return
 	}
 	title, ok := titles[id]
@@ -167,6 +171,15 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path string) {
 	target := qoderPrefixID(id)
 	for i := range results {
 		if results[i].Session.ID != target {
+			continue
+		}
+		if title == "" {
+			// The app holds this session's title and it is blank. Reporting no
+			// signal keeps the stored name; passing the sidecar through would
+			// let an older export snapshot overwrite it for good, because a
+			// blank row is something reconciliation never fixes.
+			results[i].Session.SessionName = ""
+			results[i].Session.SessionNamePresent = false
 			continue
 		}
 		results[i].Session.SessionName = title

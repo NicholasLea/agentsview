@@ -40,11 +40,6 @@ type sqliteTitleStore struct {
 	// read, so this open may see a torn page. A read error keeps the stored
 	// title, and the 5-minute expiry re-reads on the next pass.
 	immutableWhenWALEmpty bool
-	// keepBlankTitles stores an empty title so the sync pass can clear a
-	// name it previously applied. Qoder has no "the user cleared this title"
-	// signal, so a blank there carries no information and must not erase a
-	// name that came from the sidecar or the transcript.
-	keepBlankTitles bool
 }
 
 func invalidateSQLiteTitles(path string) {
@@ -117,11 +112,7 @@ func readSQLiteTitles(
 		if !title.Valid {
 			continue
 		}
-		trimmed := strings.TrimSpace(title.String)
-		if trimmed == "" && !store.keepBlankTitles {
-			continue
-		}
-		titles[id] = trimmed
+		titles[id] = strings.TrimSpace(title.String)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

@@ -10,8 +10,7 @@ import (
 const AntigravitySummariesDBName = "conversation_summaries.db"
 
 var antigravityTitleStore = sqliteTitleStore{
-	query:           "SELECT conversation_id, title FROM conversation_summaries",
-	keepBlankTitles: true,
+	query: "SELECT conversation_id, title FROM conversation_summaries",
 }
 
 func InvalidateAntigravityTitles(path string) {

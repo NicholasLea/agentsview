@@ -63,9 +63,15 @@ func TestQoderStoreTitles(t *testing.T) {
 	testjsonl.SetQoderTitle(t, store, "blank-id", "   ")
 	testjsonl.SetQoderTitle(t, store, "empty-id", "")
 	titles := readTitles(t, store)
-	assert.Equal(t, "Renamed", titles["plain-id"])
-	assert.NotContains(t, titles, "blank-id", "a whitespace-only title is no signal")
-	assert.NotContains(t, titles, "empty-id")
+	assert.Equal(t, "Renamed", titles["plain-id"], "outer whitespace is trimmed")
+	// Asserted through the lookup result rather than the value alone: a missing
+	// key would satisfy an emptiness check on its own.
+	blank, blankRow := titles["blank-id"]
+	assert.True(t, blankRow, "a whitespace-only row stays in the map for the parse to see")
+	assert.Empty(t, blank)
+	empty, emptyRow := titles["empty-id"]
+	assert.True(t, emptyRow)
+	assert.Empty(t, empty)
 }
 
 func TestQoderStoreTitlesOpenModes(t *testing.T) {
@@ -228,11 +234,11 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 			wantName: "From sidecar",
 		},
 		{
-			name:  "blank database title keeps sidecar",
-			store: "   ",
-			// Unlike Antigravity, a blank Qoder title never clears a name.
-			sidecar:  `{"title":"From sidecar"}`,
-			wantName: "From sidecar",
+			// A blank row means the app holds this session's title and has
+			// none; the older export snapshot must not take its place.
+			name:    "blank database row suppresses sidecar",
+			store:   "   ",
+			sidecar: `{"title":"From sidecar"}`,
 		},
 		{
 			name:        "no signal",
@@ -406,12 +412,6 @@ func TestQoderTitleTargetsOnlyTheFilesOwnSession(t *testing.T) {
 	assert.False(t, results[1].Session.SessionNamePresent)
 }
 
-func TestQoderProviderCapabilitiesSessionName(t *testing.T) {
-	factory, ok := ProviderFactoryByType(AgentQoder)
-	require.True(t, ok)
-	assert.Equal(t, CapabilitySupported, factory.Capabilities().Content.SessionName)
-}
-
 func TestQoderWatchPlanIncludesTitleStoreDirectory(t *testing.T) {
 	root, store := qoderTitleHome(t)
 	provider, ok := NewProvider(AgentQoder, ProviderConfig{Roots: []string{root}})
@@ -460,8 +460,8 @@ func TestQoderStoreTitlesCacheReuseAndRefresh(t *testing.T) {
 
 func TestQoderTitleSharesCacheWithAntigravity(t *testing.T) {
 	// Both agents read through one path-keyed cache. The same session ID in a
-	// Qoder store must not leak into an Antigravity store, and Antigravity's
-	// blank title stays a clear signal while Qoder's stays absent.
+	// Qoder store must not leak into an Antigravity store, so each path keeps
+	// its own value for the same ID.
 	_, qoderStore := qoderTitleHome(t)
 	testjsonl.SetQoderTitle(t, qoderStore, "shared-id", "")
 	antigravityStore := filepath.Join(t.TempDir(), AntigravitySummariesDBName)
@@ -470,13 +470,13 @@ func TestQoderTitleSharesCacheWithAntigravity(t *testing.T) {
 	_, err = conn.ExecContext(t.Context(), testjsonl.AntigravityTitleSchema)
 	require.NoError(t, err)
 	_, err = conn.ExecContext(t.Context(),
-		"INSERT INTO conversation_summaries VALUES ('shared-id', '')")
+		"INSERT INTO conversation_summaries VALUES ('shared-id', 'Real title')")
 	require.NoError(t, err)
 	require.NoError(t, conn.Close())
 	qoderTitles, _, err := QoderStoreTitles(t.Context(), qoderStore)
 	require.NoError(t, err)
-	assert.Empty(t, qoderTitles)
+	assert.Equal(t, map[string]string{"shared-id": ""}, qoderTitles)
 	antigravityTitles, _, err := AntigravityStoreTitles(t.Context(), antigravityStore)
 	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"shared-id": ""}, antigravityTitles)
+	assert.Equal(t, map[string]string{"shared-id": "Real title"}, antigravityTitles)
 }

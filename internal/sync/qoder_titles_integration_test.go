@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -243,6 +244,40 @@ func TestQoderDisplayNameOutranksNativeTitle(t *testing.T) {
 	assert.Equal(t, new("Renamed in Qoder"), session.SessionName,
 		"the native title keeps tracking, so dropping the manual name reveals it")
 	assert.Equal(t, new("Renamed by user"), session.DisplayName)
+}
+
+// TestQoderBlankRowDoesNotLoseStoredNameToSidecar covers the one blank-title
+// case reconciliation cannot heal: the app held a title, its row goes blank,
+// and an older export snapshot is still beside the transcript.
+func TestQoderBlankRowDoesNotLoseStoredNameToSidecar(t *testing.T) {
+	root, store := dbtest.QoderTitleRoot(t)
+	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
+	require.NoError(t, os.WriteFile(
+		strings.TrimSuffix(transcript, ".jsonl")+"-session.json",
+		[]byte(`{"title":"Name from export"}`), 0o644,
+	))
+	dbtest.SetQoderTitle(t, store, "Name in the app")
+	archive := dbtest.OpenTestDB(t)
+	engine := newQoderTitleEngine(t, archive, root)
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	id := "qoder:" + dbtest.QoderTitleID
+	before, err := archive.GetSessionFull(t.Context(), id)
+	require.NoError(t, err)
+	require.Equal(t, new("Name in the app"), before.SessionName)
+
+	dbtest.SetQoderTitle(t, store, "   ")
+	body, err := os.ReadFile(transcript)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(transcript,
+		append(body, []byte(`{"type":"user","uuid":"u2","timestamp":"2026-06-04T09:48:27.966Z","message":{"role":"user","content":"keep going"},"sessionId":"`+
+			dbtest.QoderTitleID+`"}`+"\n")...), 0o644))
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+
+	after, err := archive.GetSessionFull(t.Context(), id)
+	require.NoError(t, err)
+	assert.Equal(t, new("Name in the app"), after.SessionName,
+		"a blank row must not hand the name back to the export snapshot")
+	assert.NotEqual(t, before.FileHash, after.FileHash, "the transcript really reparsed")
 }
 
 func TestQoderDisabledProvidersStayIndependent(t *testing.T) {
