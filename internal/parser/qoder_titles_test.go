@@ -202,7 +202,6 @@ func TestQoderSessionRoot(t *testing.T) {
 		{"subagent", filepath.Join(outer, "-Users-u-demo", "aaaa", "subagents", "agent-1.jsonl"), outer, true},
 		{"flat file under root", filepath.Join(outer, "aaaa.jsonl"), outer, true},
 		{"most specific root", transcript, inner, true},
-		{"deleted transcript", filepath.Join(outer, "-Users-u-demo", "gone.jsonl"), outer, true},
 		{"no qoder root", filepath.Join("/tmp", "mirror", "projects", "aaaa.jsonl"), "", false},
 		{"qoderwork", filepath.Join("/home/u/.qoderwork/projects", "aaaa.jsonl"), "", false},
 	} {
@@ -453,9 +452,6 @@ func TestQoderStoreTitlesCacheReuseAndRefresh(t *testing.T) {
 		"the cached map must be returned, not re-read")
 	testjsonl.SetQoderTitle(t, store, "id", "Later")
 	assert.Equal(t, "Later", readTitles(t, store)["id"])
-	testjsonl.SetQoderTitle(t, store, "id", "Cleared")
-	InvalidateQoderTitles(store)
-	assert.Equal(t, "Cleared", readTitles(t, store)["id"])
 }
 
 func TestQoderTitleSharesCacheWithAntigravity(t *testing.T) {

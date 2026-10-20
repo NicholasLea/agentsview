@@ -280,6 +280,42 @@ func TestQoderBlankRowDoesNotLoseStoredNameToSidecar(t *testing.T) {
 	assert.NotEqual(t, before.FileHash, after.FileHash, "the transcript really reparsed")
 }
 
+// TestQoderUnreadableStoreSelfHeals pins the deliberate half of this contract:
+// an unreadable database is left as "no signal" rather than cleared, so an
+// export snapshot can show for one pass and the stored name comes back once the
+// database reads again. Clearing on a read failure would cost a title to a
+// session imported during a lock, and reconciliation already retries.
+func TestQoderUnreadableStoreSelfHeals(t *testing.T) {
+	root, store := dbtest.QoderTitleRoot(t)
+	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
+	require.NoError(t, os.WriteFile(
+		strings.TrimSuffix(transcript, ".jsonl")+"-session.json",
+		[]byte(`{"title":"Name from export"}`), 0o644,
+	))
+	dbtest.SetQoderTitle(t, store, "Name in the app")
+	archive := dbtest.OpenTestDB(t)
+	engine := newQoderTitleEngine(t, archive, root)
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	require.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+
+	original, err := os.ReadFile(store)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o644))
+	body, err := os.ReadFile(transcript)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(transcript,
+		append(body, []byte(`{"type":"user","uuid":"u2","timestamp":"2026-06-04T09:48:27.966Z","message":{"role":"user","content":"keep going"},"sessionId":"`+
+			dbtest.QoderTitleID+`"}`+"\n")...), 0o644))
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	assert.Equal(t, new("Name from export"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
+		"a database that cannot be read lets the export snapshot through")
+
+	require.NoError(t, os.WriteFile(store, original, 0o600))
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
+	assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
+		"the next pass that reads the database puts the stored name back")
+}
+
 func TestQoderDisabledProvidersStayIndependent(t *testing.T) {
 	qoderRoot, qoderStore := dbtest.QoderTitleRoot(t)
 	antigravityRoot := t.TempDir()
