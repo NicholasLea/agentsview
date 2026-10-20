@@ -4138,11 +4138,33 @@ schemas keep their existing ordering behavior.
   `<session-id>.jsonl`. This is a user-reported local observation, not
   producer-side evidence, and does not establish storage behavior for all
   Qoder CN releases or platforms.
+- **Title evidence (2026-10-20):** Both macOS builds keep session titles in a
+  `chat_sessions` table inside the app's Electron user-data database:
+  `~/Library/Application Support/com.qoder.app.stable/main.sqlite` titles
+  `~/.qoder/projects`, and `…com.qodercn.app.stable/main.sqlite` titles
+  `~/.qoder-cn/projects`. `chat_sessions.session_id` is the transcript file's
+  name without `.jsonl`. The table has more columns than Agentsview reads, and
+  the two builds' column sets differ, so only `session_id` and `title` are
+  selected. Opened read-only, the file fails `SQLITE_CANTOPEN` when its header
+  records WAL mode but no `-wal` sibling exists, which is the state left behind
+  when the app is not running; the reader therefore uses `immutable=1` whenever
+  the sibling WAL carries no frames and plain locking otherwise. Every one of
+  these claims is a single-machine user-side observation of the installed app,
+  not producer-side evidence, and does not establish behavior for other Qoder
+  releases or platforms. A root is bound to its database only by an absolute
+  home-anchored path, so a custom root, or a remote mirror unpacked under a
+  temp directory whose trailing segments also read `.qoder/projects`, never
+  borrows this machine's titles. A blank title is no signal and keeps the
+  stored name, unlike Antigravity, where it clears it. Known gap:
+  `~/.qoderwork/projects` and the three `SharedClientCache/cli/projects` roots
+  stay untitled because no title store is confirmed for them.
 - **Usage and cost:** The consumed files provide transcript and model/session
   metadata but no authoritative token, cache, reasoning, credit, or USD events
   to Agentsview.
 - **Agentsview:** `internal/parser/qoder.go` and
-  `internal/parser/qoder_provider.go`.
+  `internal/parser/qoder_provider.go`, with titles read through
+  `internal/parser/qoder_titles.go` and applied per sync pass in
+  `internal/sync/qoder_titles.go`.
 
 ## QwenPaw (`qwenpaw`)
 

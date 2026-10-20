@@ -170,3 +170,14 @@ func WithCompanionTranscript(
 ) JSONLOption {
 	return func(o *JSONLSourceSetOptions) { o.CompanionTranscript = fn }
 }
+
+// --- watch ---
+
+// WithExtraWatchRoots registers directories outside the configured roots whose
+// changes the provider still needs to see, given for the set's roots. Use it
+// when a provider reads state that lives apart from its transcripts, such as
+// an application-wide title database. The engine only watches what a plan
+// returns, so a missing entry means changes there never reach a sync pass.
+func WithExtraWatchRoots(fn func(roots []string) []WatchRoot) JSONLOption {
+	return func(o *JSONLSourceSetOptions) { o.ExtraWatchRoots = fn }
+}

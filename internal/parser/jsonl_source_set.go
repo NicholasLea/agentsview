@@ -127,6 +127,9 @@ type JSONLSourceSetOptions struct {
 	// owning transcript path from a changed sidecar path so companion events
 	// resolve without scanning the archive. See WithCompanionTranscript.
 	CompanionTranscript func(companionPath string) (string, bool)
+	// ExtraWatchRoots lists directories outside the configured roots that this
+	// provider still watches. See WithExtraWatchRoots.
+	ExtraWatchRoots func(roots []string) []WatchRoot
 }
 
 // JSONLSourceSet discovers, watches, locates, and fingerprints JSONL-like
@@ -215,10 +218,11 @@ func (s JSONLSourceSet) DiscoverEach(
 	return incomplete
 }
 
-// WatchPlan returns one watch root for each configured JSONL root. When a
-// CompanionFiles hook is configured, each discovered transcript's companion
-// basenames are added to every root's include globs so sidecar events are not
-// filtered out before SourcesForChangedPath can map them back.
+// WatchPlan returns one watch root for each configured JSONL root, plus the
+// ExtraWatchRoots entries. When a CompanionFiles hook is configured, each
+// discovered transcript's companion basenames are added to every root's include
+// globs so sidecar events are not filtered out before SourcesForChangedPath can
+// map them back.
 func (s JSONLSourceSet) WatchPlan(ctx context.Context) (WatchPlan, error) {
 	roots := make([]WatchRoot, 0, len(s.roots))
 	globs := s.includeGlobs()
@@ -236,6 +240,7 @@ func (s JSONLSourceSet) WatchPlan(ctx context.Context) (WatchPlan, error) {
 			DebounceKey:  string(s.provider) + ":jsonl:" + root,
 		})
 	}
+	roots = append(roots, s.extraWatchRoots()...)
 	return WatchPlan{Roots: roots}, nil
 }
 
@@ -256,7 +261,14 @@ func (s JSONLSourceSet) WatchRoots(
 			DebounceKey: string(s.provider) + ":jsonl:" + root,
 		})
 	}
-	return roots, nil
+	return append(roots, s.extraWatchRoots()...), nil
+}
+
+func (s JSONLSourceSet) extraWatchRoots() []WatchRoot {
+	if s.options.ExtraWatchRoots == nil {
+		return nil
+	}
+	return s.options.ExtraWatchRoots(s.roots)
 }
 
 // companionGlobs enumerates the distinct sidecar basenames across all

@@ -425,6 +425,11 @@ Antigravity sessions show the conversation title Antigravity saves in
 `conversation_summaries.db`. Renames appear shortly after that file changes,
 or on the next `agentsview sync`. Names set in AgentsView still win.
 
+Qoder sessions on macOS show the title the IDE saves in its application
+database, `main.sqlite` under the app's user-data directory, and follow renames
+there the same way. A title the app leaves blank never erases a name Qoder
+already gave a session.
+
 When a session has a native resume target, the sidebar also exposes a direct
 native session link so supported agents can reopen their own session instead of
 only navigating inside AgentsView.

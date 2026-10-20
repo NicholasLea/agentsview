@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"encoding/json/v2"
 	"fmt"
 	"os"
@@ -181,12 +182,14 @@ func FindQoderSourceFile(projectsDir, rawID string) string {
 }
 
 func ParseQoderSession(path, project, machine string) ([]ParseResult, error) {
-	results, _, err := ParseQoderSessionWithExclusions(path, project, machine)
+	results, _, err := ParseQoderSessionWithExclusions(
+		context.Background(), path, project, machine,
+	)
 	return results, err
 }
 
 func ParseQoderSessionWithExclusions(
-	path, project, machine string,
+	ctx context.Context, path, project, machine string,
 ) ([]ParseResult, []string, error) {
 	results, excluded, err := claudeParseWithExclusions(
 		path, project, machine,
@@ -203,6 +206,11 @@ func ParseQoderSessionWithExclusions(
 		if !isSubagent {
 			applyQoderMeta(&results[i].Session, meta)
 		}
+	}
+	if !isSubagent {
+		// After the sidecar pass, so a rename in the application database
+		// outranks the title captured when the sidecar was exported.
+		applyQoderTitles(ctx, results, path)
 	}
 	for i := range excluded {
 		excluded[i] = qoderExcludedID(
@@ -284,6 +292,7 @@ func retagQoderToolCalls(messages []ParsedMessage, sessionID string) {
 func applyQoderMeta(sess *ParsedSession, meta qoderSessionMeta) {
 	if meta.Title != "" {
 		sess.SessionName = meta.Title
+		sess.SessionNamePresent = true
 	}
 	if sess.Cwd == "" && meta.WorkingDir != "" {
 		sess.Cwd = meta.WorkingDir

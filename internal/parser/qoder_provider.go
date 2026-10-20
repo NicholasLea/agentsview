@@ -27,14 +27,15 @@ func newQoderSourceSet(roots []string) JSONLSourceSet {
 		WithForceReplace(),
 		WithCompanionFiles(qoderCompanionFiles),
 		WithCompanionTranscript(qoderCompanionTranscript),
+		WithExtraWatchRoots(qoderTitleWatchRoots),
 	)
 }
 
 func qoderParseFile(
-	_ context.Context, path string, req ParseRequest,
+	ctx context.Context, path string, req ParseRequest,
 ) ([]ParseResult, []string, error) {
 	results, excluded, err := ParseQoderSessionWithExclusions(
-		path, req.Source.ProjectHint, req.Machine,
+		ctx, path, req.Source.ProjectHint, req.Machine,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -160,6 +161,7 @@ func qoderProviderCapabilities() Capabilities {
 		Source: source,
 		Content: ContentCapabilities{
 			FirstMessage:         CapabilitySupported,
+			SessionName:          CapabilitySupported,
 			Cwd:                  CapabilitySupported,
 			Relationships:        CapabilitySupported,
 			Subagents:            CapabilitySupported,

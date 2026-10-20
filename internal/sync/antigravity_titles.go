@@ -13,12 +13,12 @@ import (
 	"go.kenn.io/agentsview/internal/parser"
 )
 
-type appliedAntigravityTitles struct {
+type appliedNativeTitleStore struct {
 	state  parser.SQLiteContainerState
 	readAt time.Time
 }
 
-type antigravityTitleRetryContextKey struct{}
+type nativeTitleRetryContextKey struct{}
 
 func (e *Engine) invalidateAntigravityTitleCache(paths []string) {
 	if paths == nil {
@@ -46,7 +46,7 @@ func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, stats *Sy
 		return
 	}
 	if e.appliedAntigravityTitles == nil {
-		e.appliedAntigravityTitles = make(map[string]appliedAntigravityTitles)
+		e.appliedAntigravityTitles = make(map[string]appliedNativeTitleStore)
 	}
 	for _, root := range sources.agentDirs[parser.AgentAntigravity] {
 		if ctx.Err() != nil {
@@ -68,7 +68,7 @@ func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, stats *Sy
 		}
 		if err != nil {
 			stats.RecordFailed()
-			if retry, ok := ctx.Value(antigravityTitleRetryContextKey{}).(*WatchBatch); ok {
+			if retry, ok := ctx.Value(nativeTitleRetryContextKey{}).(*WatchBatch); ok {
 				retry.Paths = watchAppendUniqueString(retry.Paths, store)
 			}
 			parser.InvalidateAntigravityTitles(store)
@@ -76,7 +76,7 @@ func (e *Engine) reconcileAntigravityTitlesLocked(ctx context.Context, stats *Sy
 			continue
 		}
 		if state != (parser.SQLiteContainerState{}) {
-			e.appliedAntigravityTitles[store] = appliedAntigravityTitles{state: state, readAt: now}
+			e.appliedAntigravityTitles[store] = appliedNativeTitleStore{state: state, readAt: now}
 		}
 	}
 }
@@ -95,25 +95,13 @@ func (e *Engine) SnapshotAntigravityTitleStates() map[string]parser.SQLiteContai
 func (e *Engine) InjectAntigravityTitleStates(states map[string]parser.SQLiteContainerState) {
 	e.syncMu.Lock()
 	defer e.syncMu.Unlock()
-	e.appliedAntigravityTitles = make(map[string]appliedAntigravityTitles, len(states))
+	e.appliedAntigravityTitles = make(map[string]appliedNativeTitleStore, len(states))
 	now := time.Now()
 	for _, root := range e.sources().agentDirs[parser.AgentAntigravity] {
 		path := filepath.Join(root, parser.AntigravitySummariesDBName)
 		if state, ok := states[path]; ok {
-			e.appliedAntigravityTitles[path] = appliedAntigravityTitles{state: state, readAt: now}
+			e.appliedAntigravityTitles[path] = appliedNativeTitleStore{state: state, readAt: now}
 		}
-	}
-}
-
-func (e *Engine) recordAntigravityTitleUpdates(stats SyncStats) {
-	if stats.TitlesUpdated > 0 || stats.Failed > 0 {
-		e.mu.Lock()
-		if stats.TitlesUpdated > 0 && stats.ProcessingComplete() {
-			e.lastSync = time.Now()
-		}
-		e.lastSyncStats.TitlesUpdated += stats.TitlesUpdated
-		e.lastSyncStats.Failed += stats.Failed
-		e.mu.Unlock()
 	}
 }
 
@@ -132,7 +120,7 @@ func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root string, t
 		return 0, err
 	}
 	var archived map[string]db.SessionWriteIdentity
-	if reader, ok := e.archiveStore.(sessionWriteIdentityReader); ok && e.deferredAntigravityTitles != nil {
+	if reader, ok := e.archiveStore.(sessionWriteIdentityReader); ok && e.deferredNativeTitles != nil {
 		// A rebuild copies archived sessions without sources only after this pass.
 		if archived, err = reader.ListSessionWriteIdentitiesByID(ctx, ids); err != nil {
 			return 0, err
@@ -160,7 +148,7 @@ func (e *Engine) applyAntigravityStoreTitles(ctx context.Context, root string, t
 			name = &title
 		}
 		if deferred {
-			e.deferredAntigravityTitles[id] = name
+			e.deferredNativeTitles[id] = name
 			continue
 		}
 		// Trashed sessions take the title too, so restoring one needs no store change.
