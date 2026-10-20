@@ -401,3 +401,37 @@ func TestQoderUsageOnlyArchiveSkipsTitleStore(t *testing.T) {
 	assert.Zero(t, engine.LastSyncStats().Failed,
 		"a usage-only pass is a no-op and never reads the store")
 }
+
+// TestQoderRemovedRowKeepsStoredName covers the second half of the "no usable
+// database title" rule: the row is gone entirely, so reconciliation has nothing
+// to restore from and the export snapshot must not take its place.
+func TestQoderRemovedRowKeepsStoredName(t *testing.T) {
+	root, store := dbtest.QoderTitleRoot(t)
+	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
+	require.NoError(t, os.WriteFile(
+		strings.TrimSuffix(transcript, ".jsonl")+"-session.json",
+		[]byte(`{"title":"Name from export"}`), 0o644,
+	))
+	dbtest.SetQoderTitle(t, store, "Name in the app")
+	archive := dbtest.OpenTestDB(t)
+	engine := newQoderTitleEngine(t, archive, root)
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	require.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+
+	conn, err := sql.Open("sqlite3", store)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(t.Context(),
+		"DELETE FROM chat_sessions WHERE session_id = ?", dbtest.QoderTitleID)
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+
+	body, err := os.ReadFile(transcript)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(transcript,
+		append(body, []byte(`{"type":"user","uuid":"u2","timestamp":"2026-06-04T09:48:27.966Z","message":{"role":"user","content":"keep going"},"sessionId":"`+
+			dbtest.QoderTitleID+`"}`+"\n")...), 0o644))
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+
+	assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
+		"a removed row must not hand the name back to the export snapshot")
+}

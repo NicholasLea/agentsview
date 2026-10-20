@@ -222,22 +222,29 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		wantPresent bool
 	}{
 		{
-			name:     "database outranks sidecar",
-			store:    "From database",
-			sidecar:  `{"title":"From sidecar"}`,
-			wantName: "From database",
+			name:        "database outranks sidecar",
+			store:       "From database",
+			sidecar:     `{"title":"From sidecar"}`,
+			wantName:    "From database",
+			wantPresent: true,
 		},
 		{
-			name:     "sidecar only",
-			sidecar:  `{"title":"From sidecar"}`,
-			wantName: "From sidecar",
+			// With no row the snapshot is only initial-import metadata: an update
+			// keeps whatever name is already stored.
+			name:        "sidecar only",
+			sidecar:     `{"title":"From sidecar"}`,
+			wantName:    "From sidecar",
+			wantPresent: false,
 		},
 		{
-			// A blank row means the app holds this session's title and has
-			// none; the older export snapshot must not take its place.
-			name:    "blank database row suppresses sidecar",
-			store:   "   ",
-			sidecar: `{"title":"From sidecar"}`,
+			// A blank row is the database saying it has no title. The snapshot
+			// survives as fallback for a first import but claims no signal, so it
+			// cannot replace a name the database supplied earlier.
+			name:        "blank database row demotes sidecar",
+			store:       "   ",
+			sidecar:     `{"title":"From sidecar"}`,
+			wantName:    "From sidecar",
+			wantPresent: false,
 		},
 		{
 			name:        "no signal",
@@ -261,7 +268,7 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 			require.Len(t, results, 1)
 			sess := results[0].Session
 			assert.Equal(t, tc.wantName, sess.SessionName)
-			assert.Equal(t, tc.wantName != "", sess.SessionNamePresent)
+			assert.Equal(t, tc.wantPresent, sess.SessionNamePresent)
 		})
 	}
 }
@@ -475,4 +482,26 @@ func TestQoderTitleSharesCacheWithAntigravity(t *testing.T) {
 	antigravityTitles, _, err := AntigravityStoreTitles(t.Context(), antigravityStore)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"shared-id": "Real title"}, antigravityTitles)
+}
+
+// TestQoderBlankRowKeepsInChatRename covers the other half of the blank-row
+// rule: the database holding no title must not erase a rename the user recorded
+// in the transcript itself.
+func TestQoderBlankRowKeepsInChatRename(t *testing.T) {
+	root, store := qoderTitleHome(t)
+	path := filepath.Join(root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID+".jsonl")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(
+		`{"type":"user","uuid":"u1","timestamp":"2026-06-04T09:47:27.966Z","message":{"role":"user","content":"help me"},"sessionId":"`+
+			testjsonl.QoderTitleID+`"}`+"\n"+
+			`{"type":"custom-title","customTitle":"Renamed in chat","sessionId":"`+
+			testjsonl.QoderTitleID+`"}`+"\n",
+	), 0o644))
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "   ")
+	results, err := ParseQoderSession(path, "sample-project", "local")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Renamed in chat", results[0].Session.SessionName)
+	assert.True(t, results[0].Session.SessionNamePresent,
+		"a blank row is not allowed to wipe an explicit rename")
 }
