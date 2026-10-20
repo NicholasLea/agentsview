@@ -102,9 +102,11 @@ func QoderTitleDatabase(root string) (string, bool) {
 
 // qoderTitleWatchRoots lists the application directories holding titles. They
 // sit outside every session root, so a rename would otherwise never reach a
-// sync pass. Only an existing database is registered, because a directory that
-// is not there yet cannot be watched; the periodic title pass picks the store
-// up once Qoder creates it, without a restart.
+// sync pass. A directory is listed whether or not its database exists yet:
+// missing roots stay in the watch plan, and a lifecycle-aware backend adds
+// ancestor coverage so the directory's creation is reported once Qoder makes
+// it. The periodic title pass still covers a database appearing inside a
+// directory that is already watched.
 func qoderTitleWatchRoots(roots []string) []WatchRoot {
 	var out []WatchRoot
 	seen := make(map[string]bool, len(roots))
@@ -114,7 +116,7 @@ func qoderTitleWatchRoots(roots []string) []WatchRoot {
 			continue
 		}
 		dir := filepath.Dir(store)
-		if seen[dir] || !IsRegularFile(store) {
+		if seen[dir] {
 			continue
 		}
 		seen[dir] = true
@@ -127,12 +129,9 @@ func qoderTitleWatchRoots(roots []string) []WatchRoot {
 }
 
 // qoderSessionTitleID returns the chat_sessions key for a transcript path, or
-// "" when the file is not one session's own transcript. Subagent transcripts
-// live under <session>/subagents/ and are keyed differently from the table.
+// "" when the file is not a session's own transcript. Subagent files are
+// excluded by the caller's subagent gate, not by a second copy of it here.
 func qoderSessionTitleID(path string) string {
-	if filepath.Base(filepath.Dir(path)) == "subagents" {
-		return ""
-	}
 	stem, ok := strings.CutSuffix(filepath.Base(path), ".jsonl")
 	if !ok || !IsValidQoderSessionID(stem) {
 		return ""

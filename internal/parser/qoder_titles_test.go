@@ -297,16 +297,51 @@ func TestQoderSubagentTranscriptIsNotTitled(t *testing.T) {
 		root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID, "subagents", "agent-123.jsonl",
 	)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	// Real prompt content: a content-free /usage probe is dropped by the
+	// parser, which would leave nothing here to assert on.
 	require.NoError(t, os.WriteFile(path, []byte(
-		`{"type":"user","uuid":"u1","timestamp":"2026-06-04T09:47:27.966Z","message":{"role":"user","content":"/usage"},"sessionId":"agent-123"}`+"\n",
+		`{"type":"user","uuid":"u1","timestamp":"2026-06-04T09:47:27.966Z","message":{"role":"user","content":"inspect the repository"},"sessionId":"agent-123"}`+"\n",
 	), 0o644))
 	results, _, err := ParseQoderSessionWithExclusions(
 		t.Context(), path, "sample-project", "local",
 	)
 	require.NoError(t, err)
+	require.NotEmpty(t, results, "the transcript must parse into a session to prove it stayed untitled")
 	for _, result := range results {
 		assert.Empty(t, result.Session.SessionName)
+		assert.False(t, result.Session.SessionNamePresent)
 	}
+}
+
+func TestQoderInChatRenameIsATitleSignal(t *testing.T) {
+	root, store := qoderTitleHome(t)
+	path := filepath.Join(
+		root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID+".jsonl",
+	)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	writeRename := func(t *testing.T) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(path, []byte(
+			`{"type":"user","uuid":"u1","timestamp":"2026-06-04T09:47:27.966Z","message":{"role":"user","content":"help me"},"sessionId":"`+
+				testjsonl.QoderTitleID+`"}`+"\n"+
+				`{"type":"custom-title","customTitle":"Renamed in chat","sessionId":"`+
+				testjsonl.QoderTitleID+`"}`+"\n",
+		), 0o644))
+	}
+	writeRename(t)
+	results, err := ParseQoderSession(path, "sample-project", "local")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Renamed in chat", results[0].Session.SessionName)
+	assert.True(t, results[0].Session.SessionNamePresent,
+		"without a title signal the stored name survives and an in-chat rename is lost")
+
+	// The application database still outranks the transcript record.
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in the app")
+	results, err = ParseQoderSession(path, "sample-project", "local")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Renamed in the app", results[0].Session.SessionName)
 }
 
 func TestQoderProviderParseTitlesLocalSourceWithoutRootMetadata(t *testing.T) {
@@ -381,23 +416,28 @@ func TestQoderWatchPlanIncludesTitleStoreDirectory(t *testing.T) {
 	root, store := qoderTitleHome(t)
 	provider, ok := NewProvider(AgentQoder, ProviderConfig{Roots: []string{root}})
 	require.True(t, ok)
-	assertQoderTitleWatched := func(t *testing.T, want bool) {
+	dir := filepath.Dir(store)
+	assertQoderTitleWatched := func(t *testing.T, stage string) {
 		t.Helper()
 		plan, err := provider.WatchPlan(t.Context())
 		require.NoError(t, err)
-		got := false
+		var found bool
 		for _, watched := range plan.Roots {
-			if watched.Path == filepath.Dir(store) {
-				got = true
-				assert.False(t, watched.Recursive)
-				assert.Equal(t, "qoder:titles:"+filepath.Dir(store), watched.DebounceKey)
+			if watched.Path != dir {
+				continue
 			}
+			found = true
+			assert.False(t, watched.Recursive, stage)
+			assert.Equal(t, "qoder:titles:"+dir, watched.DebounceKey, stage)
 		}
-		assert.Equal(t, want, got)
+		assert.True(t, found, "%s: the title directory must stay in the plan", stage)
 	}
-	assertQoderTitleWatched(t, false)
+	// Registered before the database exists: a missing root stays in the plan
+	// so a lifecycle-aware backend adds ancestor coverage and reports the
+	// directory as soon as Qoder creates it.
+	assertQoderTitleWatched(t, "store absent")
 	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed")
-	assertQoderTitleWatched(t, true)
+	assertQoderTitleWatched(t, "store present")
 }
 
 func TestQoderStoreTitlesCacheReuseAndRefresh(t *testing.T) {

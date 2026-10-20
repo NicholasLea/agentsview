@@ -203,6 +203,13 @@ func ParseQoderSessionWithExclusions(
 	fileStem := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	for i := range results {
 		retagQoderResult(&results[i], fileStem, parentID, subagentID, isSubagent)
+		if results[i].Session.claudeRenameSeen {
+			// A rename recorded in the transcript is a title signal. Qoder
+			// shares the Claude parser, and without this the Qoder entry in
+			// PreservesStoredSessionName would keep the stored name on
+			// ordinary writes and swallow in-chat renames.
+			results[i].Session.SessionNamePresent = true
+		}
 		if !isSubagent {
 			applyQoderMeta(&results[i].Session, meta)
 		}
