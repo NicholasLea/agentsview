@@ -408,7 +408,11 @@ func TestQoderTitleTargetsOnlyTheFilesOwnSession(t *testing.T) {
 	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Own title")
 	results := []ParseResult{
 		{Session: ParsedSession{Agent: AgentQoder, ID: qoderPrefixID(testjsonl.QoderTitleID)}},
-		{Session: ParsedSession{Agent: AgentQoder, ID: qoderPrefixID("22222222-3333-4333-9333-444444444444")}},
+		// A real fork ID is the parent session plus the UUID of the entry that
+		// starts the branch, so a prefix match would wrongly title it too.
+		{Session: ParsedSession{Agent: AgentQoder, ID: qoderPrefixID(
+			testjsonl.QoderTitleID + "-22222222-3333-4333-9333-444444444444",
+		)}},
 	}
 	applyQoderTitles(t.Context(), results, filepath.Join(
 		root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID+".jsonl",

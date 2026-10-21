@@ -280,12 +280,12 @@ func TestQoderBlankRowDoesNotLoseStoredNameToSidecar(t *testing.T) {
 	assert.NotEqual(t, before.FileHash, after.FileHash, "the transcript really reparsed")
 }
 
-// TestQoderUnreadableStoreSelfHeals pins the deliberate half of this contract:
-// an unreadable database is left as "no signal" rather than cleared, so an
-// export snapshot can show for one pass and the stored name comes back once the
-// database reads again. Clearing on a read failure would cost a title to a
-// session imported during a lock, and reconciliation already retries.
-func TestQoderUnreadableStoreSelfHeals(t *testing.T) {
+// TestQoderUnreadableStoreKeepsStoredName covers the last state in which the
+// database supplies no usable title: it cannot be read. The failure may be
+// permanent - a schema the reader does not understand survives every retry -
+// so the export snapshot stays initial-import metadata rather than a signal,
+// and a database that becomes readable again still applies its title.
+func TestQoderUnreadableStoreKeepsStoredName(t *testing.T) {
 	root, store := dbtest.QoderTitleRoot(t)
 	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
 	require.NoError(t, os.WriteFile(
@@ -307,13 +307,14 @@ func TestQoderUnreadableStoreSelfHeals(t *testing.T) {
 		append(body, []byte(`{"type":"user","uuid":"u2","timestamp":"2026-06-04T09:48:27.966Z","message":{"role":"user","content":"keep going"},"sessionId":"`+
 			dbtest.QoderTitleID+`"}`+"\n")...), 0o644))
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	assert.Equal(t, new("Name from export"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
-		"a database that cannot be read lets the export snapshot through")
+	assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
+		"an unreadable database must not hand the name to the export snapshot")
 
 	require.NoError(t, os.WriteFile(store, original, 0o600))
+	dbtest.SetQoderTitle(t, store, "Renamed while unreadable")
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-	assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
-		"the next pass that reads the database puts the stored name back")
+	assert.Equal(t, new("Renamed while unreadable"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
+		"a database that becomes readable again still applies its title")
 }
 
 func TestQoderDisabledProvidersStayIndependent(t *testing.T) {

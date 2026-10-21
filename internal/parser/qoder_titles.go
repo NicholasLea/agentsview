@@ -142,11 +142,13 @@ func qoderSessionTitleID(path string) string {
 // applyQoderTitles takes titles from the root's application database. The title
 // sources rank: a title the database holds, then a rename recorded in the
 // transcript, then the `-session.json` snapshot, which is export-time metadata
-// and only seeds a first import. A blank row or no row means the database says
-// nothing, so the snapshot claims no signal either and the stored name
-// survives. An unreadable database reports nothing at all, and reconciliation
-// retries it. Only the session the transcript is named for is titled; forks
-// parsed from the same file keep their own identity.
+// and only seeds a first import. Everything below a title the database holds -
+// a blank row, no row, or a database that cannot be read - leaves the snapshot
+// claiming no signal, so an update keeps the stored name instead of losing it
+// to a stale copy; a persistent schema mismatch is not transient, and the
+// retry only helps once the reason for it is gone. Only the session the
+// transcript is named for is titled; forks parsed from the same file keep
+// their own identity.
 func applyQoderTitles(ctx context.Context, results []ParseResult, path string) {
 	root, ok := QoderSessionRoot(path)
 	if !ok {
@@ -161,12 +163,10 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path string) {
 		return
 	}
 	titles, _, err := QoderStoreTitles(ctx, store)
-	if err != nil {
-		// A store that cannot be read supplies no signal, so the pass that
-		// read it can restore the title later. Reconciliation retries it.
-		return
+	title, row := "", false
+	if err == nil {
+		title, row = titles[id]
 	}
-	title, row := titles[id]
 	target := qoderPrefixID(id)
 	for i := range results {
 		if results[i].Session.ID != target {
@@ -177,11 +177,10 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path string) {
 			results[i].Session.SessionNamePresent = true
 			continue
 		}
-		// The database holds this session and has no usable title for it, either
-		// a blank row or no row at all. Reconciliation cannot heal either case,
-		// so an older export snapshot must not replace the name already stored.
-		// No signal keeps that name on update and still seeds a first import,
-		// while a rename recorded in the transcript outranks the blank row.
+		// The database supplied no usable title. Keep what the parse found for
+		// a first import, but claim no signal so an update preserves the stored
+		// name; a rename the user recorded in the transcript is their own
+		// action and stays authoritative.
 		if !results[i].Session.claudeRenameSeen {
 			results[i].Session.SessionNamePresent = false
 		}
