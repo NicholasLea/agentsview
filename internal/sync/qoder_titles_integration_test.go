@@ -25,6 +25,10 @@ func qoderRequired(t *testing.T) {
 	}
 }
 
+// qoderOtherTitleID is a second application-database row, used where one engine
+// must not see the session owned by another.
+const qoderOtherTitleID = "22222222-2222-4222-8222-222222222222"
+
 func newQoderTitleEngine(t *testing.T, archive *db.DB, roots ...string) *sync.Engine {
 	t.Helper()
 	return newQoderEngine(t, archive, sync.EngineConfig{
@@ -40,12 +44,17 @@ func newQoderEngine(t *testing.T, archive *db.DB, cfg sync.EngineConfig) *sync.E
 	return engine
 }
 
-func qoderStoredTitle(t *testing.T, archive *db.DB, id string) *string {
+func qoderTitleForID(t *testing.T, archive *db.DB, id string) *string {
 	t.Helper()
-	session, err := archive.GetSessionFull(t.Context(), "qoder:"+id)
+	session, err := archive.GetSessionFull(t.Context(), id)
 	require.NoError(t, err)
 	require.NotNil(t, session)
 	return session.SessionName
+}
+
+func qoderStoredTitle(t *testing.T, archive *db.DB, id string) *string {
+	t.Helper()
+	return qoderTitleForID(t, archive, "qoder:"+id)
 }
 
 func TestQoderTitlesFollowStore(t *testing.T) {
@@ -359,29 +368,44 @@ func TestQoderDisabledProvidersStayIndependent(t *testing.T) {
 }
 
 // TestQoderPrefixedEngineTitlesOnlyItsOwnRows pins that a store lookup always
-// carries the engine's ID prefix, so another machine's rows are never matched.
+// carries the engine's ID prefix, in both directions: a prefixed engine titles
+// its own rows through the prefixed lookup, and neither engine reaches the
+// other's row. Each engine ingests its own transcript, because one archive ends
+// up holding only one row for a transcript both engines are given.
 func TestQoderPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
 	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	dbtest.SetQoderTitle(t, store, "First")
+	remoteTranscript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
+	localTranscript := testjsonl.WriteQoderTranscript(t, root, qoderOtherTitleID, "other")
+	testjsonl.SetQoderTitle(t, store, dbtest.QoderTitleID, "First")
+	testjsonl.SetQoderTitle(t, store, qoderOtherTitleID, "First")
 	archive := dbtest.OpenTestDB(t)
 	remote := newQoderEngine(t, archive, sync.EngineConfig{
 		AgentDirs: map[parser.AgentType][]string{parser.AgentQoder: {root}},
 		Machine:   "host-b",
 		IDPrefix:  "host-b:",
 	})
-	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{transcript}))
-	prefixed := "host-b:qoder:" + dbtest.QoderTitleID
-	session, err := archive.GetSessionFull(t.Context(), prefixed)
-	require.NoError(t, err)
-	require.NotNil(t, session)
-
+	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{remoteTranscript}))
 	local := newQoderTitleEngine(t, archive, root)
-	dbtest.SetQoderTitle(t, store, "Later")
+	require.NoError(t, local.SyncPathsContext(t.Context(), []string{localTranscript}))
+	prefixed := "host-b:qoder:" + dbtest.QoderTitleID
+	require.Equal(t, new("First"), qoderTitleForID(t, archive, prefixed))
+	require.Equal(t, new("First"), qoderStoredTitle(t, archive, qoderOtherTitleID))
+
+	// A rename of the remote machine's row reaches only that row. Only the
+	// store changed, so it can arrive through reconciliation and nothing else.
+	testjsonl.SetQoderTitle(t, store, dbtest.QoderTitleID, "Renamed on host-b")
+	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{store}))
+	assert.Equal(t, new("Renamed on host-b"), qoderTitleForID(t, archive, prefixed),
+		"a prefixed engine must reach its own row through the prefixed lookup")
+	assert.Equal(t, new("First"), qoderStoredTitle(t, archive, qoderOtherTitleID),
+		"a remote pass must not rename the local session")
+
+	// And the other way: the local engine sees the same store, holds the other
+	// session, and must not rename the row belonging to host-b.
+	testjsonl.SetQoderTitle(t, store, qoderOtherTitleID, "Renamed locally")
 	require.NoError(t, local.SyncPathsContext(t.Context(), []string{store}))
-	renamed, err := archive.GetSessionFull(t.Context(), prefixed)
-	require.NoError(t, err)
-	assert.NotEqual(t, new("Later"), renamed.SessionName,
+	assert.Equal(t, new("Renamed locally"), qoderStoredTitle(t, archive, qoderOtherTitleID))
+	assert.NotEqual(t, new("Renamed locally"), qoderTitleForID(t, archive, prefixed),
 		"a local store must not rename another machine's session")
 }
 
