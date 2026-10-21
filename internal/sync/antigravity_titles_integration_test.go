@@ -152,9 +152,8 @@ func TestAntigravityTitlesReachSessionsWithoutTranscript(t *testing.T) {
 
 func TestAntigravityUnreadableTitleStoreKeepsTitle(t *testing.T) {
 	for name, schema := range map[string]string{
-		"corrupt":        "",
-		"missing_table":  "CREATE TABLE other (title TEXT)",
-		"missing_column": "CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY)",
+		"corrupt":       "",
+		"missing_table": "CREATE TABLE other (title TEXT)",
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()

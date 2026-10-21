@@ -55,13 +55,6 @@ func qoderSessionTitleStore(path string) (root, store string, ok bool) {
 // trailing path segment would bind the local database to another machine's
 // sessions, so the comparison is anchored to this user's home directory.
 func QoderTitleDatabase(root string) (string, bool) {
-	if !filepath.IsAbs(root) {
-		return "", false
-	}
-	root, _, err := ResolveProviderRoot(AgentQoder, root)
-	if err != nil {
-		return "", false
-	}
 	location, ok := qoderTitleDatabases()[root]
 	return location.store, ok
 }

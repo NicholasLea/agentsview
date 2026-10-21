@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"io/fs"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -30,11 +31,14 @@ var sqliteTitleCache = struct {
 	stores map[string]sqliteTitleSnapshot
 }{stores: make(map[string]sqliteTitleSnapshot)}
 
-// InvalidateSQLiteTitles drops the cached read of a native title database.
+// InvalidateSQLiteTitles expires the cached read, retaining its container state.
 func InvalidateSQLiteTitles(path string) {
 	sqliteTitleCache.Lock()
 	defer sqliteTitleCache.Unlock()
-	delete(sqliteTitleCache.stores, path)
+	if prior, cached := sqliteTitleCache.stores[path]; cached {
+		prior.readAt = time.Time{}
+		sqliteTitleCache.stores[path] = prior
+	}
 }
 
 // sqliteStoreTitles reads a native title database, reusing the last result
@@ -47,12 +51,13 @@ func sqliteStoreTitles(
 	sqliteTitleCache.Lock()
 	defer sqliteTitleCache.Unlock()
 	now := sqliteTitleNow()
-	if prior, cached := sqliteTitleCache.stores[path]; ok && cached &&
+	prior, cached := sqliteTitleCache.stores[path]
+	if ok && cached &&
 		prior.state == state &&
 		now.Sub(prior.readAt) < SQLiteContainerDigestVerifyInterval {
 		return prior.titles, prior.state, prior.err
 	}
-	titles, err := readSQLiteTitles(ctx, path, table, idColumn, query)
+	titles, err := readSQLiteTitles(ctx, path, table, idColumn, query, !cached || prior.state != state)
 	if ctx.Err() != nil {
 		return nil, state, ctx.Err()
 	}
@@ -72,6 +77,7 @@ func sqliteStoreTitles(
 
 func readSQLiteTitles(
 	ctx context.Context, path, table, idColumn, query string,
+	stateChanged bool,
 ) (map[string]string, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -89,13 +95,21 @@ func readSQLiteTitles(
 		return nil, err
 	}
 	defer db.Close()
-	var exists bool
+	var exists, hasID, hasTitle bool
 	if err := db.QueryRowContext(ctx, `SELECT
-		EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)
-		AND (SELECT COUNT(*) FROM pragma_table_info(?) WHERE name IN (?, 'title')) = 2`, table, table, idColumn).Scan(&exists); err != nil {
+		EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?),
+		EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name = ?),
+		EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name = 'title')`, table, table, idColumn, table).Scan(&exists, &hasID, &hasTitle); err != nil {
 		return nil, err
 	}
-	if !exists {
+	if exists && (!hasID || !hasTitle) && stateChanged {
+		column := idColumn
+		if hasID {
+			column = "title"
+		}
+		log.Printf("Warning: title database %s is missing column %s", path, column)
+	}
+	if !exists || !hasID || !hasTitle {
 		return nil, nil
 	}
 	rows, err := db.QueryContext(ctx, query)

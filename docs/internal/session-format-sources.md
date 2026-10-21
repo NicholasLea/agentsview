@@ -4151,7 +4151,8 @@ schemas keep their existing ordering behavior.
   not establish behavior for other Qoder releases or platforms. A root is bound
   to its database only by a canonical absolute home-anchored path. Root binding was
   reverified on 2026-10-21 against configuration's `ResolveProviderRoot` path:
-  default-root symlinks resolve before title lookup. Transcript membership is
+  default-root symlinks resolve before title lookup, which uses the configured
+  canonical root directly. Transcript membership is
   lexical under either the unresolved or resolved default root. A custom root,
   or a remote mirror unpacked under a temp directory whose trailing segments
   also read `.qoder/projects`, keeps its own file-side names and clears the

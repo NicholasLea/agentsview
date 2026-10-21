@@ -117,19 +117,21 @@ func TestNativeTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
 				}
 				beforeSync, beforeStats := engine.LastSync(), engine.LastSyncStats()
 				dbtest.SetAntigravityTitle(t, root, "Later")
-				failurePath := archive.Path()
-				inject := `CREATE TRIGGER fail_title_write BEFORE UPDATE OF session_name ON sessions BEGIN SELECT RAISE(FAIL, 'injected title write failure'); END`
-				repair := "DROP TRIGGER fail_title_write"
+				var raw *sql.DB
+				var savedStore []byte
 				if mode == "watcher-read" {
-					failurePath = store
-					inject = "ALTER TABLE conversation_summaries RENAME COLUMN title TO unavailable_title"
-					repair = "ALTER TABLE conversation_summaries RENAME COLUMN unavailable_title TO title"
+					var err error
+					savedStore, err = os.ReadFile(store)
+					require.NoError(t, err)
+					require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o600))
+				} else {
+					var err error
+					raw, err = sql.Open("sqlite3", archive.Path())
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, raw.Close()) })
+					_, err = raw.ExecContext(t.Context(), `CREATE TRIGGER fail_title_write BEFORE UPDATE OF session_name ON sessions BEGIN SELECT RAISE(FAIL, 'injected title write failure'); END`)
+					require.NoError(t, err)
 				}
-				raw, err := sql.Open("sqlite3", failurePath)
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, raw.Close()) })
-				_, err = raw.ExecContext(t.Context(), inject)
-				require.NoError(t, err)
 				spy := &antigravityTitleQuerySpy{Store: archive, reader: archive}
 				engine.archiveStore = spy
 				engine.deferredNativeTitles = make(map[string]*string)
@@ -177,8 +179,12 @@ func TestNativeTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
 				var missing sql.NullString
 				require.NoError(t, archive.Reader().QueryRow(t.Context(), "SELECT source_missing_at FROM sessions WHERE id = 'missing'").Scan(&missing))
 				assert.True(t, missing.Valid, "title failures preserve other agents' deletion proof")
-				_, err = raw.ExecContext(t.Context(), repair)
-				require.NoError(t, err)
+				if mode == "watcher-read" {
+					require.NoError(t, os.WriteFile(store, savedStore, 0o600))
+				} else {
+					_, err = raw.ExecContext(t.Context(), "DROP TRIGGER fail_title_write")
+					require.NoError(t, err)
+				}
 				if mode == "watcher" || mode == "watcher-read" {
 					time.Sleep(20 * time.Millisecond)
 					synctest.Wait()
