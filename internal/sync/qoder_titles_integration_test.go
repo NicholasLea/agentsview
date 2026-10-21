@@ -40,6 +40,7 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 		state, wantName string
 		fileTitle       bool
 	}{
+		{"database rename", "Renamed in the app", true},
 		{"blank row", "Name in the app", true},
 		{"sanitized blank row", "Name in the app", true},
 		{"removed row", "Updated export", true},
@@ -64,6 +65,8 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 				require.NoError(t, err)
 			}
 			switch tc.state {
+			case "database rename":
+				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in the app")
 			case "blank row":
 				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "   ")
 			case "sanitized blank row":
@@ -80,7 +83,11 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 				require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o644))
 			}
 			engine.SyncAll(t.Context(), nil)
-			assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+			if tc.state == "database rename" {
+				assert.Equal(t, new("Renamed in the app"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+			} else {
+				assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+			}
 			transcript = testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "changed transcript")
 			if tc.state == "removed row" {
 				require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Updated export"}`), 0o644))

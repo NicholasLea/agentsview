@@ -13,17 +13,11 @@ import (
 	"go.kenn.io/agentsview/internal/testjsonl"
 )
 
-func readTitles(t *testing.T, store string) map[string]string {
-	t.Helper()
-	titles, _, err := QoderStoreTitles(t.Context(), store)
-	require.NoError(t, err)
-	return titles
-}
-
-// closeWALStore leaves a WAL-mode database with no sibling files, the state a
-// machine whose Qoder app is not running presents.
-func closeWALStore(t *testing.T, store string) {
-	t.Helper()
+func TestQoderStoreTitles(t *testing.T) {
+	_, store := testjsonl.QoderTitleRoot(t)
+	testjsonl.SetQoderTitle(t, store, "plain-id", "  Renamed  ")
+	testjsonl.SetQoderTitle(t, store, "blank-id", "   ")
+	// Leave a WAL-mode database with no sibling files, as when Qoder is closed.
 	conn, err := sql.Open("sqlite3", store)
 	require.NoError(t, err)
 	_, err = conn.ExecContext(t.Context(), "PRAGMA journal_mode=WAL")
@@ -34,14 +28,8 @@ func closeWALStore(t *testing.T, store string) {
 			require.NoError(t, os.Remove(store+sibling))
 		}
 	}
-}
-
-func TestQoderStoreTitles(t *testing.T) {
-	_, store := testjsonl.QoderTitleRoot(t)
-	testjsonl.SetQoderTitle(t, store, "plain-id", "  Renamed  ")
-	testjsonl.SetQoderTitle(t, store, "blank-id", "   ")
-	closeWALStore(t, store)
-	titles := readTitles(t, store)
+	titles, _, err := QoderStoreTitles(t.Context(), store)
+	require.NoError(t, err)
 	assert.Equal(t, "Renamed", titles["plain-id"], "outer whitespace is trimmed")
 	// Asserted through the lookup result rather than the value alone: a missing
 	// key would satisfy an emptiness check on its own.
@@ -182,7 +170,10 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 			}
 			path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
 			if tc.rename {
-				require.NoError(t, os.WriteFile(path, append(mustRead(t, path), []byte(testjsonl.QoderCustomTitleJSON(testjsonl.QoderTitleID, "Renamed in chat")+"\n")...), 0o644))
+				body, err := os.ReadFile(path)
+				require.NoError(t, err)
+				rename := `{"type":"custom-title","sessionId":"` + testjsonl.QoderTitleID + `","customTitle":"Renamed in chat"}` + "\n"
+				require.NoError(t, os.WriteFile(path, append(body, []byte(rename)...), 0o644))
 			}
 			if tc.sidecar {
 				require.NoError(t, os.WriteFile(strings.TrimSuffix(path, ".jsonl")+"-session.json", []byte(`{"title":"From sidecar"}`), 0o644))
@@ -260,11 +251,4 @@ func TestQoderTitleTargetsOnlyTheFilesOwnSession(t *testing.T) {
 	assert.True(t, results[0].Session.SessionNamePresent)
 	assert.Empty(t, results[1].Session.SessionName)
 	assert.False(t, results[1].Session.SessionNamePresent)
-}
-
-func mustRead(t *testing.T, path string) []byte {
-	t.Helper()
-	body, err := os.ReadFile(path)
-	require.NoError(t, err)
-	return body
 }

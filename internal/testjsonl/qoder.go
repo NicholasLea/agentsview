@@ -69,8 +69,3 @@ func SetQoderTitle(t *testing.T, store, id string, title any) {
 	)
 	require.NoError(t, err)
 }
-
-// QoderCustomTitleJSON returns a transcript rename record.
-func QoderCustomTitleJSON(id, title string) string {
-	return mustMarshal(map[string]string{"type": "custom-title", "sessionId": id, "customTitle": title})
-}
