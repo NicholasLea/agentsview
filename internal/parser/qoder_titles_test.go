@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -504,4 +505,47 @@ func TestQoderBlankRowKeepsInChatRename(t *testing.T) {
 	assert.Equal(t, "Renamed in chat", results[0].Session.SessionName)
 	assert.True(t, results[0].Session.SessionNamePresent,
 		"a blank row is not allowed to wipe an explicit rename")
+}
+
+// TestQoderRenameOutranksSidecar covers all three title sources at once. The
+// sidecar is a snapshot taken when the session was exported, so it cannot
+// outrank a rename the user recorded in the transcript, whether or not the
+// database holds the session.
+func TestQoderRenameOutranksSidecar(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		store string
+	}{
+		{name: "blank database row", store: "   "},
+		{name: "no database row", store: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, store := qoderTitleHome(t)
+			if tc.store != "" {
+				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, tc.store)
+			}
+			path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help me")
+			require.NoError(t, os.WriteFile(path,
+				append(mustRead(t, path), []byte(
+					`{"type":"custom-title","customTitle":"Renamed in chat","sessionId":"`+
+						testjsonl.QoderTitleID+`"}`+"\n")...), 0o644))
+			require.NoError(t, os.WriteFile(
+				strings.TrimSuffix(path, ".jsonl")+"-session.json",
+				[]byte(`{"title":"Name from export"}`), 0o644,
+			))
+			results, err := ParseQoderSession(path, "sample-project", "local")
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			assert.Equal(t, "Renamed in chat", results[0].Session.SessionName,
+				"the export snapshot must not replace a rename recorded in the transcript")
+			assert.True(t, results[0].Session.SessionNamePresent)
+		})
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return body
 }

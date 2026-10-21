@@ -297,7 +297,9 @@ func retagQoderToolCalls(messages []ParsedMessage, sessionID string) {
 }
 
 func applyQoderMeta(sess *ParsedSession, meta qoderSessionMeta) {
-	if meta.Title != "" {
+	// The sidecar records the title the exporter saw, so it cannot outrank a
+	// rename the user recorded in the transcript itself.
+	if meta.Title != "" && !sess.claudeRenameSeen {
 		sess.SessionName = meta.Title
 		sess.SessionNamePresent = true
 	}
