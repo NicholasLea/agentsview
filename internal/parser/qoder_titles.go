@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // QoderTitleDBName is the database where the Qoder IDE stores session titles.
@@ -64,10 +65,21 @@ type qoderTitleStore struct {
 	store string
 }
 
+var qoderTitleDatabaseCache struct {
+	sync.Mutex
+	home   string
+	stores map[string]qoderTitleStore
+}
+
 func qoderTitleDatabases() map[string]qoderTitleStore {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return nil
+	}
+	qoderTitleDatabaseCache.Lock()
+	defer qoderTitleDatabaseCache.Unlock()
+	if qoderTitleDatabaseCache.home == home {
+		return qoderTitleDatabaseCache.stores
 	}
 	stores := make(map[string]qoderTitleStore, 2*len(qoderTitleLayouts))
 	for _, layout := range qoderTitleLayouts {
@@ -80,6 +92,8 @@ func qoderTitleDatabases() map[string]qoderTitleStore {
 		stores[unresolved] = location
 		stores[root] = location
 	}
+	qoderTitleDatabaseCache.home = home
+	qoderTitleDatabaseCache.stores = stores
 	return stores
 }
 

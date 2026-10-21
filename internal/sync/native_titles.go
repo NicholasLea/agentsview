@@ -21,18 +21,19 @@ type appliedNativeTitleStore struct {
 type nativeTitleRetryContextKey struct{}
 
 type nativeTitleSource struct {
-	agent       parser.AgentType
-	storePath   func(string) (string, bool)
-	read        func(context.Context, string) (map[string]string, parser.SQLiteContainerState, error)
-	sessionRoot func(string) (string, bool)
-	blankClears bool
+	agent               parser.AgentType
+	storePath           func(string) (string, bool)
+	read                func(context.Context, string) (map[string]string, parser.SQLiteContainerState, error)
+	sessionRoot         func(string) (string, bool)
+	blankClears         bool
+	outsideWatchedRoots bool
 }
 
 var nativeTitleSources = []nativeTitleSource{
 	{parser.AgentAntigravity, func(root string) (string, bool) {
 		return filepath.Join(root, parser.AntigravitySummariesDBName), true
-	}, parser.AntigravityStoreTitles, parser.AntigravitySessionRoot, true},
-	{parser.AgentQoder, parser.QoderTitleDatabase, parser.QoderStoreTitles, parser.QoderSessionRoot, false},
+	}, parser.AntigravityStoreTitles, parser.AntigravitySessionRoot, true, false},
+	{parser.AgentQoder, parser.QoderTitleDatabase, parser.QoderStoreTitles, parser.QoderSessionRoot, false, true},
 }
 
 // Reconcile after parsing so an older parsed title cannot win.
@@ -73,8 +74,8 @@ func (e *Engine) reconcileNativeTitlesLocked(ctx context.Context, stats *SyncSta
 			}
 			if err != nil {
 				stats.RecordFailed()
-				// Qoder stores live outside watched roots; the next sync retries them.
-				if retry, ok := ctx.Value(nativeTitleRetryContextKey{}).(*WatchBatch); ok && source.agent != parser.AgentQoder {
+				// Stores outside watched roots are retried by the next sync.
+				if retry, ok := ctx.Value(nativeTitleRetryContextKey{}).(*WatchBatch); ok && !source.outsideWatchedRoots {
 					retry.Paths = watchAppendUniqueString(retry.Paths, store)
 				}
 				parser.InvalidateSQLiteTitles(store)
