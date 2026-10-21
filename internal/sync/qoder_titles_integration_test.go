@@ -393,20 +393,24 @@ func TestQoderPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
 
 	// A rename of the remote machine's row reaches only that row. Only the
 	// store changed, so it can arrive through reconciliation and nothing else.
+	// The local row carries a pending title in the store: a pass that reached
+	// across the prefix would have somewhere to show up, and without it the
+	// sweep writes the name the row already holds and stays invisible.
 	testjsonl.SetQoderTitle(t, store, dbtest.QoderTitleID, "Renamed on host-b")
+	testjsonl.SetQoderTitle(t, store, qoderOtherTitleID, "Pending for host-b")
 	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{store}))
 	assert.Equal(t, new("Renamed on host-b"), qoderTitleForID(t, archive, prefixed),
 		"a prefixed engine must reach its own row through the prefixed lookup")
 	assert.Equal(t, new("First"), qoderStoredTitle(t, archive, qoderOtherTitleID),
 		"a remote pass must not rename the local session")
 
-	// And the other way: the local engine sees the same store, holds the other
-	// session, and must not rename the row belonging to host-b.
+	// And the other way, with the same pending trick on the remote row.
 	testjsonl.SetQoderTitle(t, store, qoderOtherTitleID, "Renamed locally")
+	testjsonl.SetQoderTitle(t, store, dbtest.QoderTitleID, "Pending for host-a")
 	require.NoError(t, local.SyncPathsContext(t.Context(), []string{store}))
 	assert.Equal(t, new("Renamed locally"), qoderStoredTitle(t, archive, qoderOtherTitleID))
-	assert.NotEqual(t, new("Renamed locally"), qoderTitleForID(t, archive, prefixed),
-		"a local store must not rename another machine's session")
+	assert.Equal(t, new("Renamed on host-b"), qoderTitleForID(t, archive, prefixed),
+		"a local pass must not rename another machine's session")
 }
 
 func TestQoderUsageOnlyArchiveSkipsTitleStore(t *testing.T) {
