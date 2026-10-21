@@ -4157,7 +4157,8 @@ schemas keep their existing ordering behavior.
   cases verify that symlinked files and project directories retain app titles
   on import and database-only renames. A custom root, or a remote
   mirror unpacked under a temp directory whose trailing segments also read
-  `.qoder/projects`, keeps its own file-side names. Names rank: an AgentsView
+  `.qoder/projects`, keeps its own file-side names and clears the archived title
+  when empty. For the two database-bound roots, names rank: an AgentsView
   display name, a non-blank app database title, then the file-side name selected
   by the parser, with the sidecar title ahead of an in-chat rename. Renames
   appear at the next sync pass: a watched change in any agent root, manual

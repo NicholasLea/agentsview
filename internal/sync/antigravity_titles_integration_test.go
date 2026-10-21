@@ -62,26 +62,20 @@ func TestAntigravityPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
 	require.NoError(t, local.SyncPathsContext(t.Context(), []string{localTranscript}))
 	prefixed := "host-b~antigravity:" + dbtest.AntigravityTitleID
 	localID := "antigravity:" + otherID
-	storedTitle := func(id string) *string {
-		session, err := archive.GetSessionFull(t.Context(), id)
-		require.NoError(t, err)
-		require.NotNil(t, session)
-		return session.SessionName
-	}
-	require.Equal(t, new("First"), storedTitle(prefixed))
-	require.Equal(t, new("First"), storedTitle(localID))
+	require.Equal(t, new("First"), nativeStoredTitle(t, archive, prefixed))
+	require.Equal(t, new("First"), nativeStoredTitle(t, archive, localID))
 
 	dbtest.SetAntigravityTitle(t, root, "Renamed on host-b")
 	setOtherTitle("Pending for host-b")
 	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{store}))
-	assert.Equal(t, new("Renamed on host-b"), storedTitle(prefixed), "a prefixed engine reaches its own row")
-	assert.Equal(t, new("First"), storedTitle(localID), "a remote pass leaves the local session alone")
+	assert.Equal(t, new("Renamed on host-b"), nativeStoredTitle(t, archive, prefixed), "a prefixed engine reaches its own row")
+	assert.Equal(t, new("First"), nativeStoredTitle(t, archive, localID), "a remote pass leaves the local session alone")
 
 	setOtherTitle("Renamed locally")
 	dbtest.SetAntigravityTitle(t, root, "Pending for host-a")
 	require.NoError(t, local.SyncPathsContext(t.Context(), []string{store}))
-	assert.Equal(t, new("Renamed locally"), storedTitle(localID))
-	assert.Equal(t, new("Renamed on host-b"), storedTitle(prefixed), "a local pass leaves the remote session alone")
+	assert.Equal(t, new("Renamed locally"), nativeStoredTitle(t, archive, localID))
+	assert.Equal(t, new("Renamed on host-b"), nativeStoredTitle(t, archive, prefixed), "a local pass leaves the remote session alone")
 }
 
 func TestAntigravityTitlesFollowStore(t *testing.T) {
