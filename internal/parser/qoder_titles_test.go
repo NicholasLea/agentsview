@@ -428,27 +428,26 @@ func TestQoderWatchPlanIncludesTitleStoreDirectory(t *testing.T) {
 	provider, ok := NewProvider(AgentQoder, ProviderConfig{Roots: []string{root}})
 	require.True(t, ok)
 	dir := filepath.Dir(store)
-	assertQoderTitleWatched := func(t *testing.T, stage string) {
+	titleWatched := func(t *testing.T) bool {
 		t.Helper()
 		plan, err := provider.WatchPlan(t.Context())
 		require.NoError(t, err)
-		var found bool
 		for _, watched := range plan.Roots {
 			if watched.Path != dir {
 				continue
 			}
-			found = true
-			assert.False(t, watched.Recursive, stage)
-			assert.Equal(t, "qoder:titles:"+dir, watched.DebounceKey, stage)
+			assert.False(t, watched.Recursive)
+			assert.Equal(t, "qoder:titles:"+dir, watched.DebounceKey)
+			return true
 		}
-		assert.True(t, found, "%s: the title directory must stay in the plan", stage)
+		return false
 	}
-	// Registered before the database exists: a missing root stays in the plan
-	// so a lifecycle-aware backend adds ancestor coverage and reports the
-	// directory as soon as Qoder creates it.
-	assertQoderTitleWatched(t, "store absent")
+	// No database, no watch root: a missing optional directory would defer its
+	// configured transcript directory from the watched-recovery probe, which is
+	// covered by TestQoderMissingTitleDirectoryKeepsTranscriptScopeProbed.
+	assert.False(t, titleWatched(t))
 	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed")
-	assertQoderTitleWatched(t, "store present")
+	assert.True(t, titleWatched(t))
 }
 
 func TestQoderStoreTitlesCacheReuseAndRefresh(t *testing.T) {
