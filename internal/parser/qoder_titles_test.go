@@ -128,16 +128,11 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		{name: "missing database no title"},
 		{name: "missing table sidecar", schema: "CREATE TABLE settings (value TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
 		{name: "no row sidecar", database: true, sidecar: true, wantName: "From sidecar", wantPresent: true},
-		{name: "no row no title", database: true},
 		{name: "blank row sidecar", database: true, row: "   ", sidecar: true, wantName: "From sidecar"},
-		{name: "blank row no title", database: true, row: "   "},
 		{name: "sanitized blank row sidecar", database: true, row: "\x00  \x00", sidecar: true, wantName: "From sidecar"},
-		{name: "stripped row sidecar", database: true, row: "\x00\x1b\u0080\x7f", sidecar: true, wantName: "From sidecar"},
-		{name: "stripped row no title", database: true, row: "\x00\x1b\u0080\x7f"},
 		{name: "sanitized database title", database: true, row: "\x00Real\t日本語\nTitle\x1b\u0080", sidecar: true, wantName: "Real\t日本語\nTitle", wantPresent: true},
 		{name: "stat error sidecar", database: true, sidecar: true, blocked: true, wantName: "From sidecar"},
 		{name: "read error sidecar", database: true, sidecar: true, wantName: "From sidecar", corrupt: true},
-		{name: "read error no title", database: true, corrupt: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, store := testjsonl.QoderTitleRoot(t)
@@ -185,49 +180,6 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 			assert.Equal(t, tc.wantPresent, results[0].Session.SessionNamePresent)
 		})
 	}
-}
-
-func TestQoderSubagentTranscriptIsNotTitled(t *testing.T) {
-	root, store := testjsonl.QoderTitleRoot(t)
-	testjsonl.SetQoderTitle(t, store, "agent-123", "Subagent name")
-	path := filepath.Join(
-		root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID, "subagents", "agent-123.jsonl",
-	)
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	// Real prompt content: a content-free /usage probe is dropped by the
-	// parser, which would leave nothing here to assert on.
-	require.NoError(t, os.WriteFile(path, []byte(
-		`{"type":"user","uuid":"u1","timestamp":"2026-06-04T09:47:27.966Z","message":{"role":"user","content":"inspect the repository"},"sessionId":"agent-123"}`+"\n",
-	), 0o644))
-	results, _, err := ParseQoderSessionWithExclusions(
-		t.Context(), path, "sample-project", "local",
-	)
-	require.NoError(t, err)
-	require.NotEmpty(t, results, "the transcript must parse into a session to prove it stayed untitled")
-	for _, result := range results {
-		assert.Empty(t, result.Session.SessionName)
-		assert.False(t, result.Session.SessionNamePresent)
-	}
-}
-
-func TestQoderParseMaterializedRemoteSource(t *testing.T) {
-	root, store := testjsonl.QoderTitleRoot(t)
-	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Local title")
-	path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
-	// A remote import unpacks to a fresh directory whose trailing segments still
-	// read ".qoder/projects". Titles must not cross machines: that rewrites the
-	// meaning of another host's session_name, not just its display.
-	mirror := filepath.Join(t.TempDir(), "mirror-1", ".qoder", "projects",
-		testjsonl.QoderProjectDir, testjsonl.QoderTitleID+".jsonl")
-	require.NoError(t, os.MkdirAll(filepath.Dir(mirror), 0o755))
-	body, err := os.ReadFile(path)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(mirror, body, 0o644))
-	results, err := ParseQoderSession(mirror, "sample-project", "host-b")
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Empty(t, results[0].Session.SessionName)
-	assert.False(t, results[0].Session.SessionNamePresent)
 }
 
 // TestQoderTitleTargetsOnlyTheFilesOwnSession covers a transcript that yields

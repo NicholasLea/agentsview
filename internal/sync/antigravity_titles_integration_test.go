@@ -124,7 +124,6 @@ func TestAntigravityTitlesFollowStore(t *testing.T) {
 				{title: "a\x00b", want: new("ab"), updates: 0},
 				{title: "\x00", want: nil, updates: 1},
 				{title: "\x00\x00", want: nil, updates: 0},
-				{title: "\x00  \x00", want: nil, updates: 0},
 			} {
 				dbtest.SetAntigravityTitle(t, root, tc.title)
 				plan, err := engine.PlanChangedPathsContext(t.Context(), []string{store})

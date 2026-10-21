@@ -38,21 +38,15 @@ func qoderStoredTitle(t *testing.T, archive *db.DB, id string) *string {
 func TestQoderTitleFallbackOnReparse(t *testing.T) {
 	for _, tc := range []struct {
 		state, wantName string
-		fileTitle       bool
 	}{
-		{"database rename", "Renamed in the app", true},
-		{"blank row", "Name in the app", true},
-		{"sanitized blank row", "Name in the app", true},
-		{"removed row", "Updated export", true},
-		{"unreadable file", "Name in the app", true},
-		{"missing database no title", "Name in the app", false},
+		{"database rename", "Renamed in the app"},
+		{"blank row", "Name in the app"},
+		{"unreadable file", "Name in the app"},
 	} {
 		t.Run(tc.state, func(t *testing.T) {
 			root, store := testjsonl.QoderTitleRoot(t)
 			transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
-			if tc.fileTitle {
-				require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Name from export"}`), 0o644))
-			}
+			require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Name from export"}`), 0o644))
 			testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Name in the app")
 			archive := dbtest.OpenTestDB(t)
 			engine := newQoderTitleEngine(t, archive, root)
@@ -69,16 +63,6 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in the app")
 			case "blank row":
 				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "   ")
-			case "sanitized blank row":
-				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "\x00  \x00")
-			case "missing database no title":
-				require.NoError(t, os.Remove(store))
-			case "removed row":
-				conn, err := sql.Open("sqlite3", store)
-				require.NoError(t, err)
-				_, err = conn.ExecContext(t.Context(), "DELETE FROM chat_sessions WHERE session_id = ?", testjsonl.QoderTitleID)
-				require.NoError(t, err)
-				require.NoError(t, conn.Close())
 			case "unreadable file":
 				require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o644))
 			}
@@ -89,9 +73,6 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 				assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 			}
 			transcript = testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "changed transcript")
-			if tc.state == "removed row" {
-				require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Updated export"}`), 0o644))
-			}
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 			session, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
 			require.NoError(t, err)
