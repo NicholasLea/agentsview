@@ -20,7 +20,8 @@ const QoderProjectDir = "-Users-alice-sample-project"
 // session root and its application database path.
 func QoderTitleRoot(t *testing.T) (root, store string) {
 	t.Helper()
-	home := t.TempDir()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	root = filepath.Join(home, ".qoder", "projects")
