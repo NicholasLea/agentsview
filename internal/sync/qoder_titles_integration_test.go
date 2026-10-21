@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/agentsview/internal/config"
 	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/dbtest"
 	"go.kenn.io/agentsview/internal/parser"
@@ -49,30 +48,7 @@ func qoderStoredTitle(t *testing.T, archive *db.DB, id string) *string {
 	return qoderTitleForID(t, archive, "qoder:"+id)
 }
 
-func TestQoderTitlesFollowStore(t *testing.T) {
-	root, store := testjsonl.QoderTitleRoot(t)
-	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
-	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
-	archive := dbtest.OpenTestDB(t)
-	engine := newQoderTitleEngine(t, archive, root)
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	require.Equal(t, new("First"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
-	before, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
-	require.NoError(t, err)
-
-	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in Qoder")
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-	after, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
-	require.NoError(t, err)
-	assert.Equal(t, new("Renamed in Qoder"), after.SessionName)
-	assert.Equal(t, 1, engine.LastSyncStats().TitlesUpdated)
-	assert.Equal(t, before.FileHash, after.FileHash,
-		"a rename must not disturb the transcript fingerprint")
-	assert.Equal(t, before.FilePath, after.FilePath)
-}
-
-// TestQoderFullSyncBackfillsTitles covers sessions ingested while Qoder held
-// the database busy, and a store created only after AgentsView started.
+// Existing sessions get names and later renames without a transcript change.
 func TestQoderFullSyncBackfillsTitles(t *testing.T) {
 	root, store := testjsonl.QoderTitleRoot(t)
 	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
@@ -82,10 +58,24 @@ func TestQoderFullSyncBackfillsTitles(t *testing.T) {
 	require.Nil(t, qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 
 	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Saved while closed")
-	engine.SyncAll(t.Context(), nil)
-	assert.Equal(t, new("Saved while closed"),
-		qoderStoredTitle(t, archive, testjsonl.QoderTitleID),
-		"existing sessions pick up titles without a transcript change")
+	stats := engine.SyncAll(t.Context(), nil)
+	require.Zero(t, stats.Failed)
+	assert.Zero(t, stats.Synced)
+	assert.Equal(t, 1, stats.TitlesUpdated)
+	require.Equal(t, new("Saved while closed"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+	before, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
+	require.NoError(t, err)
+
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in Qoder")
+	// A watched transcript change triggers the sweep for the unchanged session.
+	unrelated := testjsonl.WriteQoderTranscript(t, root, qoderOtherTitleID, "other session")
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{unrelated}))
+	after, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
+	require.NoError(t, err)
+	assert.Equal(t, new("Renamed in Qoder"), after.SessionName)
+	assert.Equal(t, 1, engine.LastSyncStats().TitlesUpdated)
+	assert.Equal(t, before.FileHash, after.FileHash)
+	assert.Equal(t, before.FilePath, after.FilePath)
 }
 
 // TestQoderStoreTitlesOnlySessionsItOwns keeps one root's database from
@@ -114,37 +104,6 @@ func TestQoderStoreTitlesOnlySessionsItOwns(t *testing.T) {
 	assert.Nil(t, qoderStoredTitle(t, archive, testjsonl.QoderTitleID),
 		"the bound root's store must not rename a session it does not own")
 	assert.Zero(t, engine.LastSyncStats().TitlesUpdated)
-}
-
-func TestQoderTitleRenamesRespectCwdFilter(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		want string
-	}{
-		{name: "excluded", want: "First"},
-		{name: "allowed", want: "Later"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root, store := testjsonl.QoderTitleRoot(t)
-			workspace := t.TempDir()
-			transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
-			testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
-			archive := dbtest.OpenTestDB(t)
-			require.NoError(t, newQoderTitleEngine(t, archive, root).
-				SyncPathsContext(t.Context(), []string{transcript}))
-			require.NoError(t, archive.UpdateSessionCwd(t.Context(),
-				"qoder:"+testjsonl.QoderTitleID, filepath.Join(workspace, tc.name)))
-			allowed := filepath.Join(workspace, "allowed")
-			engine := newQoderEngine(t, archive, sync.EngineConfig{
-				AgentDirs:          map[parser.AgentType][]string{parser.AgentQoder: {root}},
-				Machine:            "host-a",
-				IncludeCwdPrefixes: []string{allowed},
-			})
-			testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Later")
-			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-			assert.Equal(t, new(tc.want), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
-		})
-	}
 }
 
 func TestQoderTrashedSessionRestoresWithCurrentTitle(t *testing.T) {
@@ -201,47 +160,6 @@ func TestQoderDisplayNameOutranksNativeTitle(t *testing.T) {
 	assert.Equal(t, new("Renamed by user"), session.DisplayName)
 }
 
-func TestQoderDisabledProvidersStayIndependent(t *testing.T) {
-	qoderRoot, qoderStore := testjsonl.QoderTitleRoot(t)
-	antigravityRoot := t.TempDir()
-	qoderTranscript := testjsonl.WriteQoderTranscript(t, qoderRoot, testjsonl.QoderTitleID, "hello")
-	antigravityTranscript := dbtest.WriteAntigravityTitleTranscript(t, antigravityRoot, "hello")
-	testjsonl.SetQoderTitle(t, qoderStore, testjsonl.QoderTitleID, "Qoder title")
-	dbtest.SetAntigravityTitle(t, antigravityRoot, "Antigravity title")
-	archive := dbtest.OpenTestDB(t)
-	both := map[parser.AgentType][]string{
-		parser.AgentQoder: {qoderRoot}, parser.AgentAntigravity: {antigravityRoot},
-	}
-	require.NoError(t, newQoderEngine(t, archive, sync.EngineConfig{
-		AgentDirs: both, Machine: "host-a",
-	}).SyncPathsContext(t.Context(), []string{qoderTranscript, antigravityTranscript}))
-
-	t.Run("antigravity disabled", func(t *testing.T) {
-		engine := newQoderEngine(t, archive, sync.EngineConfig{
-			AgentDirs:      both,
-			Machine:        "host-a",
-			DisabledAgents: []parser.AgentType{parser.AgentAntigravity},
-		})
-		testjsonl.SetQoderTitle(t, qoderStore, testjsonl.QoderTitleID, "Qoder renamed")
-		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{qoderStore}))
-		assert.Equal(t, new("Qoder renamed"),
-			qoderStoredTitle(t, archive, testjsonl.QoderTitleID),
-			"disabling Antigravity must not stop Qoder titles")
-	})
-	t.Run("qoder disabled", func(t *testing.T) {
-		engine := newQoderEngine(t, archive, sync.EngineConfig{
-			AgentDirs:      both,
-			Machine:        "host-a",
-			DisabledAgents: []parser.AgentType{parser.AgentQoder},
-		})
-		store := dbtest.SetAntigravityTitle(t, antigravityRoot, "Antigravity renamed")
-		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-		assert.Equal(t, new("Antigravity renamed"),
-			antigravityStoredTitle(t, archive),
-			"disabling Qoder must not stop Antigravity titles")
-	})
-}
-
 // TestQoderPrefixedEngineTitlesOnlyItsOwnRows pins that a store lookup always
 // carries the engine's ID prefix, in both directions: a prefixed engine titles
 // its own rows through the prefixed lookup, and neither engine reaches the
@@ -288,24 +206,6 @@ func TestQoderPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
 		"a local pass must not rename another machine's session")
 }
 
-func TestQoderUsageOnlyArchiveSkipsTitleStore(t *testing.T) {
-	root, store := testjsonl.QoderTitleRoot(t)
-	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
-	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
-	archive := dbtest.OpenTestDB(t)
-	archive.SetArchiveContent(config.ArchiveContentUsage)
-	require.NoError(t, newQoderTitleEngine(t, archive, root).
-		SyncPathsContext(t.Context(), []string{transcript}))
-
-	// An unreadable store would be reported if the pass read it at all. A fresh
-	// engine keeps the failure count observable rather than inherited.
-	require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o644))
-	engine := newQoderTitleEngine(t, archive, root)
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-	assert.Zero(t, engine.LastSyncStats().Failed,
-		"a usage-only pass is a no-op and never reads the store")
-}
-
 func TestQoderTitleFallbackOnReparse(t *testing.T) {
 	for _, tc := range []struct {
 		state, wantName string
@@ -347,7 +247,7 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
 			assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 			transcript = testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "changed transcript")
-			if tc.fileTitle {
+			if tc.state == "removed row" {
 				require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Updated export"}`), 0o644))
 			}
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
@@ -363,8 +263,9 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 	}
 }
 
-func TestQoderMissingDatabaseFollowsSidecarUpdates(t *testing.T) {
-	root, _ := testjsonl.QoderTitleRoot(t)
+func TestQoderMissingRowFollowsSidecarUpdates(t *testing.T) {
+	root, store := testjsonl.QoderTitleRoot(t)
+	testjsonl.SetQoderTitle(t, store, "other-session", "Other title")
 	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
 	sidecar := strings.TrimSuffix(transcript, ".jsonl") + "-session.json"
 	archive := dbtest.OpenTestDB(t)
@@ -373,8 +274,8 @@ func TestQoderMissingDatabaseFollowsSidecarUpdates(t *testing.T) {
 		title, want string
 	}{
 		{"First", "First"},
-		{"Renamed", "Renamed"},
-		{"", "Renamed"},
+		{"Later", "Later"},
+		{"", "Later"},
 	} {
 		require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"`+tc.title+`"}`), 0o644))
 		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))

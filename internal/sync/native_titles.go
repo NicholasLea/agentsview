@@ -21,19 +21,18 @@ type appliedNativeTitleStore struct {
 type nativeTitleRetryContextKey struct{}
 
 type nativeTitleSource struct {
-	agent        parser.AgentType
-	databaseName string
-	storePath    func(string) (string, bool)
-	read         func(context.Context, string) (map[string]string, parser.SQLiteContainerState, error)
-	sessionRoot  func(string) (string, bool)
-	blankClears  bool
+	agent       parser.AgentType
+	storePath   func(string) (string, bool)
+	read        func(context.Context, string) (map[string]string, parser.SQLiteContainerState, error)
+	sessionRoot func(string) (string, bool)
+	blankClears bool
 }
 
 var nativeTitleSources = []nativeTitleSource{
-	{parser.AgentAntigravity, parser.AntigravitySummariesDBName, func(root string) (string, bool) {
+	{parser.AgentAntigravity, func(root string) (string, bool) {
 		return filepath.Join(root, parser.AntigravitySummariesDBName), true
 	}, parser.AntigravityStoreTitles, parser.AntigravitySessionRoot, true},
-	{parser.AgentQoder, parser.QoderTitleDBName, parser.QoderTitleDatabase, parser.QoderStoreTitles, parser.QoderSessionRoot, false},
+	{parser.AgentQoder, parser.QoderTitleDatabase, parser.QoderStoreTitles, parser.QoderSessionRoot, false},
 }
 
 // Reconcile after parsing so an older parsed title cannot win.
@@ -113,9 +112,10 @@ func (e *Engine) invalidateNativeTitleCache(paths []string) {
 			if !reachable[store] {
 				continue
 			}
-			// Frameless WAL and shared-memory events can come from our own reader.
-			if _, ok := parser.SQLiteContainerPathForEvent(filepath.Dir(store), path, source.databaseName, true); !ok {
-				continue
+			if source.agent == parser.AgentAntigravity {
+				if _, ok := parser.SQLiteContainerPathForEvent(filepath.Dir(store), path, parser.AntigravitySummariesDBName, true); !ok {
+					continue
+				}
 			}
 			delete(e.appliedNativeTitles[source.agent], store)
 			parser.InvalidateSQLiteTitles(store)

@@ -83,39 +83,6 @@ func QoderTitleDatabase(root string) (string, bool) {
 	return "", false
 }
 
-// qoderTitleWatchRoots lists the application directories holding titles. They
-// sit outside every session root, so a rename would otherwise never reach a
-// sync pass.
-//
-// A directory is registered only while its database exists, because watching a
-// missing one costs more than it buys: the daemon attributes every missing
-// provider root to the configured directory it came from and defers that
-// directory from the watched-recovery probe (probeWatchRecoveryScope in
-// cmd/agentsview/main.go), so an absent optional title directory would drop an
-// existing transcript scope from gap reconciliation, overflow recovery, and
-// periodic audits. Losing that coverage is worse than a rename waiting for the
-// next sync pass, which runs the title sweep anyway.
-func qoderTitleWatchRoots(roots []string) []WatchRoot {
-	var out []WatchRoot
-	seen := make(map[string]bool, len(roots))
-	for _, root := range roots {
-		store, ok := QoderTitleDatabase(root)
-		if !ok {
-			continue
-		}
-		dir := filepath.Dir(store)
-		if seen[dir] || !IsRegularFile(store) {
-			continue
-		}
-		seen[dir] = true
-		out = append(out, WatchRoot{
-			Path:        dir,
-			DebounceKey: "qoder:titles:" + dir,
-		})
-	}
-	return out
-}
-
 // applyQoderTitles uses a non-blank app database title for the file's own
 // session. A successful read with no row preserves the parser's title signal.
 // A blank row or read error suppresses that signal, so file-side names seed

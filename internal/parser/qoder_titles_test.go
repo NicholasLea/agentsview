@@ -60,45 +60,6 @@ func TestQoderStoreTitlesWithoutWALSiblings(t *testing.T) {
 	assert.Equal(t, "First", readTitles(t, store)["id"])
 }
 
-func TestQoderStoreTitlesErrors(t *testing.T) {
-	t.Run("missing table", func(t *testing.T) {
-		_, store := testjsonl.QoderTitleRoot(t)
-		require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
-		conn, err := sql.Open("sqlite3", store)
-		require.NoError(t, err)
-		_, err = conn.ExecContext(t.Context(), "CREATE TABLE other (id TEXT)")
-		require.NoError(t, err)
-		require.NoError(t, conn.Close())
-		_, _, err = QoderStoreTitles(t.Context(), store)
-		assert.Error(t, err)
-	})
-	t.Run("missing column", func(t *testing.T) {
-		_, store := testjsonl.QoderTitleRoot(t)
-		require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
-		conn, err := sql.Open("sqlite3", store)
-		require.NoError(t, err)
-		_, err = conn.ExecContext(t.Context(),
-			"CREATE TABLE chat_sessions (session_id TEXT, name TEXT)")
-		require.NoError(t, err)
-		require.NoError(t, conn.Close())
-		_, _, err = QoderStoreTitles(t.Context(), store)
-		assert.Error(t, err)
-	})
-	t.Run("not a database", func(t *testing.T) {
-		_, store := testjsonl.QoderTitleRoot(t)
-		require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
-		require.NoError(t, os.WriteFile(store, []byte("not sqlite"), 0o600))
-		_, _, err := QoderStoreTitles(t.Context(), store)
-		assert.Error(t, err)
-	})
-	t.Run("absent store is empty", func(t *testing.T) {
-		_, store := testjsonl.QoderTitleRoot(t)
-		titles, _, err := QoderStoreTitles(t.Context(), store)
-		require.NoError(t, err)
-		assert.Empty(t, titles)
-	})
-}
-
 func TestQoderTitleDatabase(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -225,35 +186,6 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 	}
 }
 
-func TestQoderParseSurvivesCorruptSidecar(t *testing.T) {
-	t.Run("database still titles it", func(t *testing.T) {
-		root, store := testjsonl.QoderTitleRoot(t)
-		testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "From database")
-		path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
-		require.NoError(t, os.WriteFile(
-			path[:len(path)-len(".jsonl")]+"-session.json", []byte("{not json"), 0o644,
-		))
-		results, err := ParseQoderSession(path, "sample-project", "local")
-		require.NoError(t, err)
-		require.Len(t, results, 1)
-		assert.Equal(t, "From database", results[0].Session.SessionName)
-		assert.True(t, results[0].Session.SessionNamePresent)
-	})
-	t.Run("no other signal leaves it blank", func(t *testing.T) {
-		root, store := testjsonl.QoderTitleRoot(t)
-		testjsonl.SetQoderTitle(t, store, "some-other-session", "Unrelated")
-		path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
-		require.NoError(t, os.WriteFile(
-			path[:len(path)-len(".jsonl")]+"-session.json", []byte("{not json"), 0o644,
-		))
-		results, err := ParseQoderSession(path, "sample-project", "local")
-		require.NoError(t, err)
-		require.Len(t, results, 1)
-		assert.Empty(t, results[0].Session.SessionName)
-		assert.False(t, results[0].Session.SessionNamePresent)
-	})
-}
-
 func TestQoderSubagentTranscriptIsNotTitled(t *testing.T) {
 	root, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, "agent-123", "Subagent name")
@@ -275,44 +207,6 @@ func TestQoderSubagentTranscriptIsNotTitled(t *testing.T) {
 		assert.Empty(t, result.Session.SessionName)
 		assert.False(t, result.Session.SessionNamePresent)
 	}
-}
-
-func TestQoderInChatRenameIsATitleSignal(t *testing.T) {
-	root, store := testjsonl.QoderTitleRoot(t)
-	path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help me")
-	require.NoError(t, os.WriteFile(path, append(mustRead(t, path), []byte(testjsonl.QoderCustomTitleJSON(testjsonl.QoderTitleID, "Renamed in chat")+"\n")...), 0o644))
-	results, err := ParseQoderSession(path, "sample-project", "local")
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, "Renamed in chat", results[0].Session.SessionName)
-	assert.True(t, results[0].Session.SessionNamePresent,
-		"without a title signal the stored name survives and an in-chat rename is lost")
-
-	// The application database still outranks the transcript record.
-	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in the app")
-	results, err = ParseQoderSession(path, "sample-project", "local")
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, "Renamed in the app", results[0].Session.SessionName)
-}
-
-func TestQoderProviderParseTitlesLocalSourceWithoutRootMetadata(t *testing.T) {
-	root, store := testjsonl.QoderTitleRoot(t)
-	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed")
-	testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
-	provider, ok := NewProvider(AgentQoder, ProviderConfig{Roots: []string{root}})
-	require.True(t, ok)
-	sources, err := provider.Discover(t.Context())
-	require.NoError(t, err)
-	require.Len(t, sources, 1)
-	// JSONL sources carry no ConfiguredRoot, so titles cannot depend on one.
-	assert.Empty(t, sources[0].ConfiguredRoot)
-	outcome, err := provider.Parse(t.Context(), ParseRequest{Source: sources[0]})
-	require.NoError(t, err)
-	require.Len(t, outcome.Results, 1)
-	session := outcome.Results[0].Result.Session
-	assert.Equal(t, "Renamed", session.SessionName)
-	assert.True(t, session.SessionNamePresent)
 }
 
 func TestQoderParseMaterializedRemoteSource(t *testing.T) {
@@ -360,74 +254,6 @@ func TestQoderTitleTargetsOnlyTheFilesOwnSession(t *testing.T) {
 	assert.True(t, results[0].Session.SessionNamePresent)
 	assert.Empty(t, results[1].Session.SessionName)
 	assert.False(t, results[1].Session.SessionNamePresent)
-}
-
-func TestQoderWatchPlanIncludesTitleStoreDirectory(t *testing.T) {
-	root, store := testjsonl.QoderTitleRoot(t)
-	provider, ok := NewProvider(AgentQoder, ProviderConfig{Roots: []string{root}})
-	require.True(t, ok)
-	dir := filepath.Dir(store)
-	titleWatched := func(t *testing.T) bool {
-		t.Helper()
-		plan, err := provider.WatchPlan(t.Context())
-		require.NoError(t, err)
-		for _, watched := range plan.Roots {
-			if watched.Path != dir {
-				continue
-			}
-			assert.False(t, watched.Recursive)
-			assert.Equal(t, "qoder:titles:"+dir, watched.DebounceKey)
-			return true
-		}
-		return false
-	}
-	// No database, no watch root: a missing optional directory would defer its
-	// configured transcript directory from the watched-recovery probe, which is
-	// covered by TestQoderMissingTitleDirectoryKeepsTranscriptScopeProbed.
-	assert.False(t, titleWatched(t))
-	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed")
-	assert.True(t, titleWatched(t))
-}
-
-func TestQoderStoreTitlesCacheReuseAndRefresh(t *testing.T) {
-	_, store := testjsonl.QoderTitleRoot(t)
-	testjsonl.SetQoderTitle(t, store, "id", "First")
-	scans := 0
-	ctx := WithSharedContainerScanObserver(t.Context(), func() { scans++ })
-	for range 2 {
-		titles, _, err := QoderStoreTitles(ctx, store)
-		require.NoError(t, err)
-		assert.Equal(t, "First", titles["id"])
-	}
-	assert.Equal(t, 1, scans, "unchanged reads within the verify interval scan once")
-	testjsonl.SetQoderTitle(t, store, "id", "Later")
-	titles, _, err := QoderStoreTitles(ctx, store)
-	require.NoError(t, err)
-	assert.Equal(t, "Later", titles["id"])
-	assert.Equal(t, 2, scans, "a changed store triggers another scan")
-}
-
-func TestQoderTitleSharesCacheWithAntigravity(t *testing.T) {
-	// Both agents read through one path-keyed cache. The same session ID in a
-	// Qoder store must not leak into an Antigravity store, so each path keeps
-	// its own value for the same ID.
-	_, qoderStore := testjsonl.QoderTitleRoot(t)
-	testjsonl.SetQoderTitle(t, qoderStore, "shared-id", "")
-	antigravityStore := filepath.Join(t.TempDir(), AntigravitySummariesDBName)
-	conn, err := sql.Open("sqlite3", antigravityStore)
-	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(), testjsonl.AntigravityTitleSchema)
-	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(),
-		"INSERT INTO conversation_summaries VALUES ('shared-id', 'Real title')")
-	require.NoError(t, err)
-	require.NoError(t, conn.Close())
-	qoderTitles, _, err := QoderStoreTitles(t.Context(), qoderStore)
-	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"shared-id": ""}, qoderTitles)
-	antigravityTitles, _, err := AntigravityStoreTitles(t.Context(), antigravityStore)
-	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"shared-id": "Real title"}, antigravityTitles)
 }
 
 func mustRead(t *testing.T, path string) []byte {

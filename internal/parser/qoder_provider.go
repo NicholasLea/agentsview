@@ -27,7 +27,6 @@ func newQoderSourceSet(roots []string) JSONLSourceSet {
 		WithForceReplace(),
 		WithCompanionFiles(qoderCompanionFiles),
 		WithCompanionTranscript(qoderCompanionTranscript),
-		WithExtraWatchRoots(qoderTitleWatchRoots),
 	)
 }
 

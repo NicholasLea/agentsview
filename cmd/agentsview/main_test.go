@@ -3900,38 +3900,3 @@ func TestCollectWatchRootsWatchesAliasHomeIndexes(t *testing.T) {
 	require.True(t, ok, "the alias home must be watched for session_index.jsonl")
 	assert.False(t, aliasRoot.recursive)
 }
-
-// TestQoderMissingTitleDirectoryKeepsTranscriptScopeProbed pins why the title
-// directory is registered only while its database exists: a missing provider
-// root defers the configured directory it came from, and a deferred directory
-// drops every root sharing it from the watched-recovery probe. An optional IDE
-// metadata directory must never cost an existing transcript scope its gap
-// reconciliation, overflow recovery, and periodic audits.
-func TestQoderMissingTitleDirectoryKeepsTranscriptScopeProbed(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	root := filepath.Join(home, ".qoder", "projects")
-	require.NoError(t, os.MkdirAll(root, 0o755))
-	store, ok := parser.QoderTitleDatabase(root)
-	require.True(t, ok)
-
-	cfg := config.Config{
-		DataDir:        t.TempDir(),
-		DBPath:         filepath.Join(home, "sessions.db"),
-		InstallationID: "local",
-		AgentDirs:      map[parser.AgentType][]string{parser.AgentQoder: {root}},
-	}
-	scope := probeWatchRecoveryScope(cfg)
-	assert.Contains(t, scope.available, root,
-		"an existing transcript root must stay probed without its title database")
-	assert.NotContains(t, scope.deferred, filepath.Clean(root))
-
-	// With the database present the directory is watched, and the transcript
-	// root is still probed rather than deferred by its own sibling.
-	require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
-	require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o600))
-	watched := probeWatchRecoveryScope(cfg)
-	assert.Contains(t, watched.available, root)
-	assert.NotContains(t, watched.deferred, filepath.Clean(root))
-}

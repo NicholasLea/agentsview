@@ -4152,17 +4152,20 @@ schemas keep their existing ordering behavior.
   behavior for other Qoder releases or platforms. A root is bound to its
   database only by an absolute home-anchored path, so a custom root, or a remote
   mirror unpacked under a temp directory whose trailing segments also read
-  `.qoder/projects`, never borrows this machine's titles. Titles rank: app
-  database title, then the file-side name selected by the parser, with the
-  sidecar title ahead of an in-chat rename. Without a database file, or after a
+  `.qoder/projects`, keeps its own file-side names. Names rank: an AgentsView
+  display name, a non-blank app database title, then the file-side name selected
+  by the parser, with the sidecar title ahead of an in-chat rename. Renames
+  appear at the next sync pass: a watched change in any agent root, manual
+  sync, or startup. Without a database file, or after a
   successful read with no row for the session, non-empty file-side names update
   normally; an empty parsed name preserves the archived title. A blank row or
   read error suppresses every file-side title signal, including an in-chat
   rename without a sidecar. Inserts still seed from the parsed name; updates
   keep the archived name. Antigravity instead clears the name for a blank title.
-  Known gap: `~/.qoderwork/projects` and the three
-  `SharedClientCache/cli/projects` roots stay untitled because no title store is
-  confirmed for them.
+  Rechecked against the parser and synthetic stores on 2026-10-21. The database
+  lookup covers macOS only. `~/.qoderwork/projects` and the three
+  `SharedClientCache/cli/projects` roots keep file-side names because no title
+  store is confirmed for them.
 - **Usage and cost:** The consumed files provide transcript and model/session
   metadata but no authoritative token, cache, reasoning, credit, or USD events
   to Agentsview.
