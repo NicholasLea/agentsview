@@ -206,7 +206,7 @@ func ParseQoderSessionWithExclusions(
 		if !isSubagent {
 			applyQoderMeta(&results[i].Session, meta)
 		}
-		results[i].Session.SessionNamePresent = results[i].Session.SessionName != ""
+		results[i].Session.SessionNamePresent = true
 	}
 	if !isSubagent {
 		// After the sidecar pass, so a rename in the application database

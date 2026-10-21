@@ -112,12 +112,14 @@ func (e *Engine) SyncChangedPathPlanWithOptionsContext(
 		planFiles, fallbackFiles...,
 	))
 	result.FilesDiscovered = len(files)
+	changedPaths := make([]string, 0, len(plan.attribution))
+	for path := range plan.attribution {
+		changedPaths = append(changedPaths, path)
+	}
 	if len(files) == 0 {
 		// A title store change alone plans no session files.
 		e.syncMu.Lock()
-		for path := range plan.attribution {
-			e.invalidateNativeTitleCache([]string{path})
-		}
+		e.invalidateNativeTitleCache(changedPaths)
 		e.reconcileNativeTitlesLocked(ctx, &result.Stats)
 		e.recordNativeTitleUpdates(result.Stats)
 		e.syncMu.Unlock()
@@ -129,9 +131,7 @@ func (e *Engine) SyncChangedPathPlanWithOptionsContext(
 	}
 
 	e.syncMu.Lock()
-	for path := range plan.attribution {
-		e.invalidateNativeTitleCache([]string{path})
-	}
+	e.invalidateNativeTitleCache(changedPaths)
 	var stats SyncStats
 	defer func() {
 		if stats.hasSessionChanges() {

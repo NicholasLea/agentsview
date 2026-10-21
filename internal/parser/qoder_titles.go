@@ -29,35 +29,21 @@ func QoderStoreTitles(ctx context.Context, path string) (map[string]string, SQLi
 	return sqliteStoreTitles(ctx, path, "chat_sessions", qoderTitleQuery)
 }
 
-// QoderSessionRoot returns the Qoder session root that owns a transcript path,
-// even after the file was deleted. Roots are matched innermost-out, so a root
-// nested inside another root claims its own transcripts.
+// QoderSessionRoot returns the canonical default root that owns a transcript
+// path, even after the file was deleted. A nested default root takes precedence.
 func QoderSessionRoot(path string) (string, bool) {
-	dir := filepath.Dir(filepath.Clean(path))
-	for {
-		if isQoderSessionRoot(dir) {
-			return dir, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
+	path, _, err := ResolveProviderRoot(AgentQoder, path)
+	if err != nil {
+		return "", false
 	}
-}
-
-func isQoderSessionRoot(dir string) bool {
-	base := filepath.Base(dir)
-	if base != "projects" {
-		return false
-	}
-	dotDir := filepath.Base(filepath.Dir(dir))
-	for _, layout := range qoderTitleLayouts {
-		if dotDir == layout.dotDir {
-			return true
+	owner := ""
+	for root := range qoderTitleDatabases() {
+		rel, err := filepath.Rel(root, path)
+		if err == nil && rel != "." && filepath.IsLocal(rel) && len(root) > len(owner) {
+			owner = root
 		}
 	}
-	return false
+	return owner, owner != ""
 }
 
 // QoderTitleDatabase returns the application database holding titles for a
@@ -67,20 +53,31 @@ func isQoderSessionRoot(dir string) bool {
 // trailing path segment would bind the local database to another machine's
 // sessions, so the comparison is anchored to this user's home directory.
 func QoderTitleDatabase(root string) (string, bool) {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	if !filepath.IsAbs(root) {
 		return "", false
 	}
-	clean := filepath.Clean(root)
-	for _, layout := range qoderTitleLayouts {
-		if clean == filepath.Join(home, layout.dotDir, "projects") {
-			store := filepath.Join(
-				home, "Library", "Application Support", layout.appID, QoderTitleDBName,
-			)
-			return store, true
-		}
+	root, _, err := ResolveProviderRoot(AgentQoder, root)
+	if err != nil {
+		return "", false
 	}
-	return "", false
+	store, ok := qoderTitleDatabases()[root]
+	return store, ok
+}
+
+func qoderTitleDatabases() map[string]string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	stores := make(map[string]string, len(qoderTitleLayouts))
+	for _, layout := range qoderTitleLayouts {
+		root, _, err := ResolveProviderRoot(AgentQoder, filepath.Join(home, layout.dotDir, "projects"))
+		if err != nil {
+			continue
+		}
+		stores[root] = filepath.Join(home, "Library", "Application Support", layout.appID, QoderTitleDBName)
+	}
+	return stores
 }
 
 // applyQoderTitles uses a non-blank app database title for the file's own
@@ -95,6 +92,9 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path, fileStem
 	store, ok := QoderTitleDatabase(root)
 	if !ok {
 		return
+	}
+	for i := range results {
+		results[i].Session.SessionNamePresent = results[i].Session.SessionName != ""
 	}
 	titles, _, err := QoderStoreTitles(ctx, store)
 	title, row := "", false

@@ -4150,7 +4150,9 @@ schemas keep their existing ordering behavior.
   this reader path. The installed-app schema and paths above are single-machine
   user-side observations, not producer-side evidence, and do not establish
   behavior for other Qoder releases or platforms. A root is bound to its
-  database only by an absolute home-anchored path, so a custom root, or a remote
+  database only by a canonical absolute home-anchored path. Root binding was
+  reverified on 2026-10-21 against configuration's `ResolveProviderRoot` path:
+  default-root symlinks resolve before title lookup. A custom root, or a remote
   mirror unpacked under a temp directory whose trailing segments also read
   `.qoder/projects`, keeps its own file-side names. Names rank: an AgentsView
   display name, a non-blank app database title, then the file-side name selected

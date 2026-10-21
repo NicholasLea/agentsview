@@ -38,13 +38,27 @@ func qoderStoredTitle(t *testing.T, archive *db.DB, id string) *string {
 func TestQoderTitleFallbackOnReparse(t *testing.T) {
 	for _, tc := range []struct {
 		state, wantName string
+		symlink         bool
 	}{
-		{"database rename", "Renamed in the app"},
-		{"blank row", "Name in the app"},
-		{"unreadable file", "Name in the app"},
+		{"database rename", "Renamed in the app", false},
+		{"database rename", "Renamed in the app", true},
+		{"blank row", "Name in the app", false},
+		{"unreadable file", "Name in the app", false},
 	} {
-		t.Run(tc.state, func(t *testing.T) {
+		name := tc.state
+		if tc.symlink {
+			name += " symlinked default root"
+		}
+		t.Run(name, func(t *testing.T) {
 			root, store := testjsonl.QoderTitleRoot(t)
+			if tc.symlink {
+				target := t.TempDir()
+				require.NoError(t, os.Remove(root))
+				require.NoError(t, os.Symlink(target, root))
+				var err error
+				root, _, err = parser.ResolveProviderRoot(parser.AgentQoder, root)
+				require.NoError(t, err)
+			}
 			transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
 			require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Name from export"}`), 0o644))
 			testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Name in the app")
@@ -89,30 +103,55 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 }
 
 func TestQoderMissingRowFollowsSidecarUpdates(t *testing.T) {
-	root, store := testjsonl.QoderTitleRoot(t)
-	require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
-	conn, err := sql.Open("sqlite3", store)
-	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(), testjsonl.QoderTitleSchema)
-	require.NoError(t, err)
-	require.NoError(t, conn.Close())
-	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
-	sidecar := strings.TrimSuffix(transcript, ".jsonl") + "-session.json"
-	archive := dbtest.OpenTestDB(t)
-	engine := newQoderTitleEngine(t, archive, root)
-	for _, tc := range []struct {
-		title, want string
-	}{
-		{title: "First", want: "First"},
-		{title: "Later", want: "Later"},
-		{title: "", want: "Later"},
-	} {
-		require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"`+tc.title+`"}`), 0o644))
-		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))
-		assert.Zero(t, engine.LastSyncStats().Failed)
-		assert.Equal(t, new(tc.want), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+	for _, custom := range []bool{false, true} {
+		name := "default root"
+		if custom {
+			name = "custom root"
+		}
+		t.Run(name, func(t *testing.T) {
+			root, store := testjsonl.QoderTitleRoot(t)
+			if custom {
+				root = t.TempDir()
+			}
+			require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
+			conn, err := sql.Open("sqlite3", store)
+			require.NoError(t, err)
+			_, err = conn.ExecContext(t.Context(), testjsonl.QoderTitleSchema)
+			require.NoError(t, err)
+			require.NoError(t, conn.Close())
+			transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+			sidecar := strings.TrimSuffix(transcript, ".jsonl") + "-session.json"
+			archive := dbtest.OpenTestDB(t)
+			engine := newQoderTitleEngine(t, archive, root)
+			for _, tc := range []struct {
+				title, want string
+				remove      bool
+			}{
+				{title: "First", want: "First"},
+				{title: "Later", want: "Later"},
+				{remove: true, want: "Later"},
+				{title: "", want: "Later"},
+			} {
+				if tc.remove {
+					require.NoError(t, os.Remove(sidecar))
+				} else {
+					require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"`+tc.title+`"}`), 0o644))
+				}
+				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))
+				assert.Zero(t, engine.LastSyncStats().Failed)
+				if custom && tc.title == "" {
+					assert.Nil(t, qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+				} else {
+					assert.Equal(t, new(tc.want), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+				}
+			}
+			stats := engine.SyncAll(t.Context(), nil)
+			assert.Zero(t, stats.Failed)
+			if custom {
+				assert.Nil(t, qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+			} else {
+				assert.Equal(t, new("Later"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+			}
+		})
 	}
-	stats := engine.SyncAll(t.Context(), nil)
-	assert.Zero(t, stats.Failed)
-	assert.Equal(t, new("Later"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 }

@@ -64,6 +64,19 @@ func TestQoderTitleDatabase(t *testing.T) {
 			got, ok := QoderTitleDatabase(tc.root)
 			assert.True(t, ok)
 			assert.Equal(t, tc.want, got)
+			t.Run("symlinked default root", func(t *testing.T) {
+				target := t.TempDir()
+				require.NoError(t, os.MkdirAll(filepath.Dir(tc.root), 0o755))
+				require.NoError(t, os.Symlink(target, tc.root))
+				resolved, _, err := ResolveProviderRoot(AgentQoder, tc.root)
+				require.NoError(t, err)
+				got, ok := QoderTitleDatabase(resolved)
+				assert.True(t, ok)
+				assert.Equal(t, tc.want, got)
+				owner, ok := QoderSessionRoot(filepath.Join(resolved, "project", "missing.jsonl"))
+				assert.True(t, ok)
+				assert.Equal(t, resolved, owner)
+			})
 		})
 	}
 	for _, tc := range []struct {
@@ -86,8 +99,13 @@ func TestQoderTitleDatabase(t *testing.T) {
 }
 
 func TestQoderSessionRoot(t *testing.T) {
-	outer := filepath.Join(string(filepath.Separator), "home", "u", ".qoder", "projects")
-	inner := filepath.Join(outer, "nested", ".qoder-cn", "projects")
+	home := t.TempDir()
+	home, err := filepath.EvalSymlinks(home)
+	require.NoError(t, err)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	outer := filepath.Join(home, ".qoder", "projects")
+	inner := filepath.Join(home, ".qoder-cn", "projects")
 	transcript := filepath.Join(inner, "-Users-u-demo", "aaaa.jsonl")
 	for _, tc := range []struct {
 		name, path, want string
@@ -96,7 +114,7 @@ func TestQoderSessionRoot(t *testing.T) {
 		{"international", filepath.Join(outer, "-Users-u-demo", "aaaa.jsonl"), outer, true},
 		{"subagent", filepath.Join(outer, "-Users-u-demo", "aaaa", "subagents", "agent-1.jsonl"), outer, true},
 		{"flat file under root", filepath.Join(outer, "aaaa.jsonl"), outer, true},
-		{"most specific root", transcript, inner, true},
+		{"cn", transcript, inner, true},
 		{"no qoder root", filepath.Join("/tmp", "mirror", "projects", "aaaa.jsonl"), "", false},
 		{"qoderwork", filepath.Join("/home/u/.qoderwork/projects", "aaaa.jsonl"), "", false},
 	} {
@@ -120,12 +138,14 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		corrupt     bool
 		blocked     bool
 		schema      string
+		custom      bool
 	}{
 		{name: "database beats both files", database: true, row: "From database", sidecar: true, rename: true, wantName: "From database", wantPresent: true},
 		{name: "missing database sidecar", sidecar: true, wantName: "From sidecar", wantPresent: true},
 		{name: "missing database rename", rename: true, wantName: "Renamed in chat", wantPresent: true},
 		{name: "missing database both files", sidecar: true, rename: true, wantName: "From sidecar", wantPresent: true},
 		{name: "missing database no title"},
+		{name: "custom root no title clears name", custom: true, wantPresent: true},
 		{name: "missing table sidecar", schema: "CREATE TABLE settings (value TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
 		{name: "no row sidecar", database: true, sidecar: true, wantName: "From sidecar", wantPresent: true},
 		{name: "blank row sidecar", database: true, row: "   ", sidecar: true, wantName: "From sidecar"},
@@ -136,6 +156,9 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, store := testjsonl.QoderTitleRoot(t)
+			if tc.custom {
+				root = t.TempDir()
+			}
 			if tc.schema != "" {
 				require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
 				conn, err := sql.Open("sqlite3", store)
