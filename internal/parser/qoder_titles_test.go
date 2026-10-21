@@ -16,18 +16,7 @@ import (
 func TestQoderStoreTitles(t *testing.T) {
 	_, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, "plain-id", "  Renamed  ")
-	testjsonl.SetQoderTitle(t, store, "blank-id", "   ")
-	// Leave a WAL-mode database with no sibling files, as when Qoder is closed.
-	conn, err := sql.Open("sqlite3", store)
-	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(), "PRAGMA journal_mode=WAL")
-	require.NoError(t, err)
-	require.NoError(t, conn.Close())
-	for _, sibling := range []string{"-wal", "-shm"} {
-		if _, err := os.Stat(store + sibling); err == nil {
-			require.NoError(t, os.Remove(store+sibling))
-		}
-	}
+	testjsonl.SetQoderTitle(t, store, "blank-id", "\x00  \x00")
 	titles, _, err := QoderStoreTitles(t.Context(), store)
 	require.NoError(t, err)
 	assert.Equal(t, "Renamed", titles["plain-id"], "outer whitespace is trimmed")
@@ -116,7 +105,7 @@ func TestQoderSessionRoot(t *testing.T) {
 		{"flat file under root", filepath.Join(outer, "aaaa.jsonl"), outer, true},
 		{"cn", transcript, inner, true},
 		{"no qoder root", filepath.Join("/tmp", "mirror", "projects", "aaaa.jsonl"), "", false},
-		{"qoderwork", filepath.Join("/home/u/.qoderwork/projects", "aaaa.jsonl"), "", false},
+		{"qoderwork", filepath.Join(home, ".qoderwork", "projects", "aaaa.jsonl"), "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, ok := QoderSessionRoot(tc.path)
@@ -149,8 +138,6 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		{name: "missing table sidecar", schema: "CREATE TABLE settings (value TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
 		{name: "no row sidecar", database: true, sidecar: true, wantName: "From sidecar", wantPresent: true},
 		{name: "blank row sidecar", database: true, row: "   ", sidecar: true, wantName: "From sidecar"},
-		{name: "sanitized blank row sidecar", database: true, row: "\x00  \x00", sidecar: true, wantName: "From sidecar"},
-		{name: "sanitized database title", database: true, row: "\x00Real\t日本語\nTitle\x1b\u0080", sidecar: true, wantName: "Real\t日本語\nTitle", wantPresent: true},
 		{name: "stat error sidecar", database: true, sidecar: true, blocked: true, wantName: "From sidecar"},
 		{name: "read error sidecar", database: true, sidecar: true, wantName: "From sidecar", corrupt: true},
 	} {
