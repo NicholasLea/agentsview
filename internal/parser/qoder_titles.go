@@ -139,11 +139,14 @@ func qoderSessionTitleID(path string) string {
 	return stem
 }
 
-// applyQoderTitles takes titles from the root's application database. A title
-// it holds outranks every other source. When the database holds the session
-// without a usable title, the other sources fall back to initial-import
-// metadata: an already stored name survives. Only the session the transcript is
-// named for is titled; forks parsed from the same file keep their own identity.
+// applyQoderTitles takes titles from the root's application database. The title
+// sources rank: a title the database holds, then a rename recorded in the
+// transcript, then the `-session.json` snapshot, which is export-time metadata
+// and only seeds a first import. A blank row or no row means the database says
+// nothing, so the snapshot claims no signal either and the stored name
+// survives. An unreadable database reports nothing at all, and reconciliation
+// retries it. Only the session the transcript is named for is titled; forks
+// parsed from the same file keep their own identity.
 func applyQoderTitles(ctx context.Context, results []ParseResult, path string) {
 	root, ok := QoderSessionRoot(path)
 	if !ok {
