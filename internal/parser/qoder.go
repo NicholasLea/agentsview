@@ -203,13 +203,7 @@ func ParseQoderSessionWithExclusions(
 	fileStem := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	for i := range results {
 		retagQoderResult(&results[i], fileStem, parentID, subagentID, isSubagent)
-		if results[i].Session.claudeRenameSeen {
-			// A rename recorded in the transcript is a title signal. Qoder
-			// shares the Claude parser, and without this the Qoder entry in
-			// PreservesStoredSessionName would keep the stored name on
-			// ordinary writes and swallow in-chat renames.
-			results[i].Session.SessionNamePresent = true
-		}
+		results[i].Session.SessionNamePresent = true
 		if !isSubagent {
 			applyQoderMeta(&results[i].Session, meta)
 		}
@@ -217,7 +211,7 @@ func ParseQoderSessionWithExclusions(
 	if !isSubagent {
 		// After the sidecar pass, so a rename in the application database
 		// outranks the title captured when the sidecar was exported.
-		applyQoderTitles(ctx, results, path)
+		applyQoderTitles(ctx, results, path, meta.Title != "")
 	}
 	for i := range excluded {
 		excluded[i] = qoderExcludedID(
@@ -297,11 +291,8 @@ func retagQoderToolCalls(messages []ParsedMessage, sessionID string) {
 }
 
 func applyQoderMeta(sess *ParsedSession, meta qoderSessionMeta) {
-	// The sidecar records the title the exporter saw, so it cannot outrank a
-	// rename the user recorded in the transcript itself.
-	if meta.Title != "" && !sess.claudeRenameSeen {
+	if meta.Title != "" {
 		sess.SessionName = meta.Title
-		sess.SessionNamePresent = true
 	}
 	if sess.Cwd == "" && meta.WorkingDir != "" {
 		sess.Cwd = meta.WorkingDir

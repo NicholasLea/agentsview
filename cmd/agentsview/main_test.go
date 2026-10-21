@@ -3908,11 +3908,9 @@ func TestCollectWatchRootsWatchesAliasHomeIndexes(t *testing.T) {
 // metadata directory must never cost an existing transcript scope its gap
 // reconciliation, overflow recovery, and periodic audits.
 func TestQoderMissingTitleDirectoryKeepsTranscriptScopeProbed(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("the Qoder title database path is macOS only")
-	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	root := filepath.Join(home, ".qoder", "projects")
 	require.NoError(t, os.MkdirAll(root, 0o755))
 	store, ok := parser.QoderTitleDatabase(root)

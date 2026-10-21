@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -24,24 +23,11 @@ var qoderTitleLayouts = []struct {
 	{".qoder-cn", "com.qodercn.app.stable"},
 }
 
-var qoderTitleStore = sqliteTitleStore{
-	// Only these two columns are read: the two builds' tables are not
-	// column-identical, and a missing column must surface as an error that
-	// leaves stored titles alone.
-	//
-	// Deleted and archived rows are included because a title is still the
-	// title; only sessions AgentsView has ingested are ever looked up by ID.
-	query:                 "SELECT session_id, title FROM chat_sessions",
-	immutableWhenWALEmpty: true,
-}
+const qoderTitleQuery = "SELECT session_id, title FROM chat_sessions"
 
 // QoderStoreTitles reads the titles from one Qoder application database.
 func QoderStoreTitles(ctx context.Context, path string) (map[string]string, SQLiteContainerState, error) {
-	return sqliteStoreTitles(ctx, path, qoderTitleStore)
-}
-
-func InvalidateQoderTitles(path string) {
-	invalidateSQLiteTitles(path)
+	return sqliteStoreTitles(ctx, path, qoderTitleQuery)
 }
 
 // QoderSessionRoot returns the Qoder session root that owns a transcript path,
@@ -81,9 +67,6 @@ func isQoderSessionRoot(dir string) bool {
 // trailing path segment would bind the local database to another machine's
 // sessions, so the comparison is anchored to this user's home directory.
 func QoderTitleDatabase(root string) (string, bool) {
-	if runtime.GOOS != "darwin" {
-		return "", false
-	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return "", false
@@ -144,23 +127,15 @@ func qoderSessionTitleID(path string) string {
 	return stem
 }
 
-// applyQoderTitles takes titles from the root's application database. The title
-// sources rank: a title the database holds, then a rename recorded in the
-// transcript, then the `-session.json` snapshot, which is export-time metadata
-// and only seeds a first import. Everything below a title the database holds -
-// a blank row, no row, or a database that cannot be read - leaves the snapshot
-// claiming no signal, so an update keeps the stored name instead of losing it
-// to a stale copy; a persistent schema mismatch is not transient, and the
-// retry only helps once the reason for it is gone. Only the session the
-// transcript is named for is titled; forks parsed from the same file keep
-// their own identity.
-func applyQoderTitles(ctx context.Context, results []ParseResult, path string) {
+// applyQoderTitles prefers the app database title, then the file-side name
+// already selected by the parser. Only the transcript's own session is titled.
+func applyQoderTitles(ctx context.Context, results []ParseResult, path string, sidecarTitle bool) {
 	root, ok := QoderSessionRoot(path)
 	if !ok {
 		return
 	}
 	store, ok := QoderTitleDatabase(root)
-	if !ok {
+	if !ok || !IsRegularFile(store) {
 		return
 	}
 	id := qoderSessionTitleID(path)
@@ -182,11 +157,9 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path string) {
 			results[i].Session.SessionNamePresent = true
 			continue
 		}
-		// The database supplied no usable title. Keep what the parse found for
-		// a first import, but claim no signal so an update preserves the stored
-		// name; a rename the user recorded in the transcript is their own
-		// action and stays authoritative.
-		if !results[i].Session.claudeRenameSeen {
+		// The parsed name seeds a first import. Only a transcript rename
+		// without a sidecar supplies a title signal for updates.
+		if !results[i].Session.claudeRenameSeen || sidecarTitle {
 			results[i].Session.SessionNamePresent = false
 		}
 	}

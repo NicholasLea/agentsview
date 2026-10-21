@@ -3,7 +3,6 @@ package dbtest
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,11 +18,9 @@ const QoderTitleID = testjsonl.QoderTitleID
 // any other root, including a mirror extraction, resolves to no database.
 func QoderTitleRoot(t *testing.T) (root, store string) {
 	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skip("the Qoder title database path is macOS only")
-	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	root = filepath.Join(home, ".qoder", "projects")
 	require.NoError(t, os.MkdirAll(root, 0o755))
 	store, ok := parser.QoderTitleDatabase(root)

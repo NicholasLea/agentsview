@@ -2,24 +2,125 @@ package sync
 
 import (
 	"context"
+	"log"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/parser"
 )
 
-// nativeTitleAgents lists the providers whose session titles live outside the
-// transcript. Each is reconciled and invalidated independently so disabling
-// one never stops the other from picking up renames.
+type appliedNativeTitleStore struct {
+	state  parser.SQLiteContainerState
+	readAt time.Time
+}
+
+type nativeTitleRetryContextKey struct{}
+
+type nativeTitleSource struct {
+	agent        parser.AgentType
+	databaseName string
+	storePath    func(string) (string, bool)
+	read         func(context.Context, string) (map[string]string, parser.SQLiteContainerState, error)
+	sessionRoot  func(string) (string, bool)
+	blankClears  bool
+}
+
+var nativeTitleSources = []nativeTitleSource{
+	{parser.AgentAntigravity, parser.AntigravitySummariesDBName, func(root string) (string, bool) {
+		return filepath.Join(root, parser.AntigravitySummariesDBName), true
+	}, parser.AntigravityStoreTitles, parser.AntigravitySessionRoot, true},
+	{parser.AgentQoder, parser.QoderTitleDBName, parser.QoderTitleDatabase, parser.QoderStoreTitles, parser.QoderSessionRoot, false},
+}
+
+// Reconcile after parsing so an older parsed title cannot win.
 func (e *Engine) reconcileNativeTitlesLocked(ctx context.Context, stats *SyncStats) {
-	e.reconcileAntigravityTitlesLocked(ctx, stats)
-	e.reconcileQoderTitlesLocked(ctx, stats)
+	if e.db.ArchiveContent().UsageOnly() {
+		return
+	}
+	sources := e.sources()
+	if e.appliedNativeTitles == nil {
+		e.appliedNativeTitles = make(map[parser.AgentType]map[string]appliedNativeTitleStore)
+	}
+	for _, source := range nativeTitleSources {
+		if _, enabled := sources.providerFactories[source.agent]; !enabled {
+			continue
+		}
+		applied := e.appliedNativeTitles[source.agent]
+		if applied == nil {
+			applied = make(map[string]appliedNativeTitleStore)
+			e.appliedNativeTitles[source.agent] = applied
+		}
+		seen := make(map[string]bool)
+		for _, root := range sources.agentDirs[source.agent] {
+			if ctx.Err() != nil {
+				return
+			}
+			store, ok := source.storePath(root)
+			if !ok || seen[store] {
+				continue
+			}
+			seen[store] = true
+			state, exists := parser.StatSQLiteContainerState(store)
+			now := time.Now()
+			if prior, ok := applied[store]; ok && exists && prior.state == state && now.Sub(prior.readAt) < parser.SQLiteContainerDigestVerifyInterval {
+				continue
+			}
+			delete(applied, store)
+			parser.InvalidateSQLiteTitles(store)
+			titles, state, err := source.read(ctx, store)
+			if err == nil {
+				var n int
+				n, err = e.applyNativeStoreTitles(ctx, source, root, titles)
+				stats.TitlesUpdated += n
+			}
+			if err != nil {
+				stats.RecordFailed()
+				if retry, ok := ctx.Value(nativeTitleRetryContextKey{}).(*WatchBatch); ok {
+					retry.Paths = watchAppendUniqueString(retry.Paths, store)
+				}
+				parser.InvalidateSQLiteTitles(store)
+				log.Printf("%s titles %s: %v", source.agent, store, err)
+				continue
+			}
+			if state != (parser.SQLiteContainerState{}) {
+				applied[store] = appliedNativeTitleStore{state: state, readAt: now}
+			}
+		}
+	}
 }
 
 func (e *Engine) invalidateNativeTitleCache(paths []string) {
-	e.invalidateAntigravityTitleCache(paths)
-	e.invalidateQoderTitleCache(paths)
+	for _, source := range nativeTitleSources {
+		reachable := make(map[string]bool)
+		for _, root := range e.sources().agentDirs[source.agent] {
+			if store, ok := source.storePath(root); ok {
+				reachable[store] = true
+			}
+		}
+		if paths == nil {
+			clear(e.appliedNativeTitles[source.agent])
+			for store := range reachable {
+				parser.InvalidateSQLiteTitles(store)
+			}
+			continue
+		}
+		for _, path := range paths {
+			store := strings.TrimSuffix(filepath.Clean(path), "-wal")
+			if !reachable[store] {
+				continue
+			}
+			// Frameless WAL and shared-memory events can come from our own reader.
+			if _, ok := parser.SQLiteContainerPathForEvent(filepath.Dir(store), path, source.databaseName, true); !ok {
+				continue
+			}
+			delete(e.appliedNativeTitles[source.agent], store)
+			parser.InvalidateSQLiteTitles(store)
+		}
+	}
 }
 
 // recordNativeTitleUpdates folds a title-only pass into the reported sync
@@ -37,36 +138,77 @@ func (e *Engine) recordNativeTitleUpdates(stats SyncStats) {
 	}
 }
 
-// invalidateQoderTitleCache drops cached reads for the Qoder application
-// databases named by a changed-path batch. Only a store this engine can reach
-// counts, so a main.sqlite elsewhere on the machine is not one.
-func (e *Engine) invalidateQoderTitleCache(paths []string) {
-	if paths == nil {
-		clear(e.appliedQoderTitles)
-		for _, store := range e.qoderTitleStores() {
-			parser.InvalidateQoderTitles(store.path)
+func (e *Engine) applyNativeStoreTitles(ctx context.Context, source nativeTitleSource, root string, titles map[string]string) (updated int, err error) {
+	if len(titles) == 0 {
+		return 0, nil
+	}
+	prefix := e.idPrefix + string(source.agent) + ":"
+	ids := make([]string, 0, len(titles))
+	for id := range maps.Keys(titles) {
+		ids = append(ids, prefix+id)
+	}
+	slices.Sort(ids)
+	stored, err := e.db.ListSessionWriteIdentitiesByID(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
+	var archived map[string]db.SessionWriteIdentity
+	if reader, ok := e.archiveStore.(sessionWriteIdentityReader); ok && e.deferredNativeTitles != nil {
+		// A rebuild copies archived sessions without sources only after this pass.
+		if archived, err = reader.ListSessionWriteIdentitiesByID(ctx, ids); err != nil {
+			return 0, err
 		}
-		return
 	}
-	reachable := make(map[string]bool)
-	for _, store := range e.qoderTitleStores() {
-		reachable[store.path] = true
-	}
-	for _, path := range paths {
-		store := strings.TrimSuffix(filepath.Clean(path), "-wal")
-		if !reachable[store] {
+	for _, id := range ids {
+		session, ok := stored[id]
+		deferred := false
+		if !ok {
+			session, deferred = archived[id]
+		}
+		if !ok && !deferred {
 			continue
 		}
-		// A read-only connection creates and deletes an empty WAL on open and
-		// close, and rewrites the `-shm` index. Neither says anything about the
-		// titles, and invalidating on them would make each refresh emit the very
-		// event that schedules the next one.
-		if _, ok := parser.SQLiteContainerPathForEvent(
-			filepath.Dir(store), path, parser.QoderTitleDBName, true,
-		); !ok {
+		title := db.SanitizeUTF8(titles[strings.TrimPrefix(id, prefix)])
+		if title == "" && !source.blankClears {
 			continue
 		}
-		delete(e.appliedQoderTitles, store)
-		parser.InvalidateQoderTitles(store)
+		if session.SessionName != nil && *session.SessionName == title ||
+			session.SessionName == nil && title == "" {
+			continue
+		}
+		if !e.nativeRootOwns(source, root, session.FilePath) || !e.cwdFilter.allows(session.Cwd) {
+			continue
+		}
+		var name *string
+		if title != "" {
+			name = &title
+		}
+		if deferred {
+			e.deferredNativeTitles[id] = name
+			continue
+		}
+		// Trashed sessions take the title too, so restoring one needs no store change.
+		if err := e.db.RefreshNativeSessionName(ctx, id, name); err != nil {
+			return updated, err
+		}
+		updated++
 	}
+	return updated, nil
+}
+
+// nativeRootOwns keeps a store from renaming a same-ID session that
+// belongs to another configured root.
+func (e *Engine) nativeRootOwns(source nativeTitleSource, root, storedPath string) bool {
+	if e.pathRewriter != nil {
+		if e.storedPathResolver == nil {
+			return false
+		}
+		resolved, ok := e.storedPathResolver(storedPath)
+		if !ok {
+			return false
+		}
+		storedPath = resolved
+	}
+	owner, ok := source.sessionRoot(storedPath)
+	return ok && sameReconciliationSourcePath(owner, root)
 }

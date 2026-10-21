@@ -4145,17 +4145,18 @@ schemas keep their existing ordering behavior.
   `~/.qoder-cn/projects`. `chat_sessions.session_id` is the transcript file's
   name without `.jsonl`. The table has more columns than Agentsview reads, and
   the two builds' column sets differ, so only `session_id` and `title` are
-  selected. Opened read-only, the file fails `SQLITE_CANTOPEN` when its header
-  records WAL mode but no `-wal` sibling exists, which is the state left behind
-  when the app is not running; the reader therefore uses `immutable=1` whenever
-  the sibling WAL carries no frames and plain locking otherwise. Every one of
-  these claims is a single-machine user-side observation of the installed app,
-  not producer-side evidence, and does not establish behavior for other Qoder
-  releases or platforms. A root is bound to its database only by an absolute
-  home-anchored path, so a custom root, or a remote mirror unpacked under a
-  temp directory whose trailing segments also read `.qoder/projects`, never
-  borrows this machine's titles. A blank title is no signal and keeps the
-  stored name, unlike Antigravity, where it clears it. Known gap:
+  selected. The database is read with ordinary read-only locking, like every
+  other live app database. A WAL-mode fixture without sibling files verifies
+  this reader path. The installed-app schema and paths above are single-machine
+  user-side observations, not producer-side evidence, and do not establish
+  behavior for other Qoder releases or platforms. A root is bound to its database
+  only by an absolute home-anchored path, so a custom root, or a remote mirror
+  unpacked under a temp directory whose trailing segments also read `.qoder/projects`, never
+  borrows this machine's titles. Titles rank: app database title, then the
+  file-side name selected by the parser, with the sidecar title ahead of an
+  in-chat rename. Without a database file, file-side names update normally.
+  A blank title is no signal and keeps the stored name, unlike Antigravity,
+  where it clears it. Known gap:
   `~/.qoderwork/projects` and the three `SharedClientCache/cli/projects` roots
   stay untitled because no title store is confirmed for them.
 - **Usage and cost:** The consumed files provide transcript and model/session
@@ -4164,7 +4165,7 @@ schemas keep their existing ordering behavior.
 - **Agentsview:** `internal/parser/qoder.go` and
   `internal/parser/qoder_provider.go`, with titles read through
   `internal/parser/qoder_titles.go` and applied per sync pass in
-  `internal/sync/qoder_titles.go`.
+  `internal/sync/native_titles.go`.
 
 ## QwenPaw (`qwenpaw`)
 

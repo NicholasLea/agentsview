@@ -2,7 +2,6 @@ package testjsonl
 
 import (
 	"database/sql"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,10 +34,7 @@ func WriteQoderTranscript(t *testing.T, root, id, content string) string {
 	t.Helper()
 	path := filepath.Join(root, QoderProjectDir, id+".jsonl")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	body := fmt.Sprintf(
-		`{"type":"user","uuid":"u1","timestamp":"2026-06-04T09:47:27.966Z","message":{"role":"user","content":%q},"sessionId":%q}`+"\n",
-		content, id,
-	)
+	body := ClaudeUserWithSessionIDJSON(content, "2026-06-04T09:47:27.966Z", id) + "\n"
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
 	return path
 }
@@ -59,4 +55,9 @@ func SetQoderTitle(t *testing.T, store, id string, title any) {
 		id, title, "/Users/alice/sample-project",
 	)
 	require.NoError(t, err)
+}
+
+// QoderCustomTitleJSON returns a transcript rename record.
+func QoderCustomTitleJSON(id, title string) string {
+	return mustMarshal(map[string]string{"type": "custom-title", "sessionId": id, "customTitle": title})
 }

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -17,13 +16,6 @@ import (
 	"go.kenn.io/agentsview/internal/sync"
 	"go.kenn.io/agentsview/internal/testjsonl"
 )
-
-func qoderRequired(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skip("the Qoder title database path is macOS only")
-	}
-}
 
 // qoderOtherTitleID is a second application-database row, used where one engine
 // must not see the session owned by another.
@@ -96,58 +88,12 @@ func TestQoderFullSyncBackfillsTitles(t *testing.T) {
 		"existing sessions pick up titles without a transcript change")
 }
 
-// TestQoderBlankTitleKeepsStoredName pins the deliberate difference from
-// Antigravity: a blank chat_sessions title carries no signal, so it never
-// erases a name the sidecar or an earlier read supplied.
-func TestQoderBlankTitleKeepsStoredName(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	dbtest.SetQoderTitle(t, store, "Named")
-	archive := dbtest.OpenTestDB(t)
-	engine := newQoderTitleEngine(t, archive, root)
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	require.Equal(t, new("Named"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
-
-	dbtest.SetQoderTitle(t, store, "   ")
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-	assert.Equal(t, new("Named"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
-}
-
-func TestQoderUnreadableTitleStoreKeepsTitle(t *testing.T) {
-	for name, schema := range map[string]string{
-		"missing_table":  "CREATE TABLE other (title TEXT)",
-		"missing_column": "CREATE TABLE chat_sessions (session_id TEXT PRIMARY KEY, name TEXT)",
-	} {
-		t.Run(name, func(t *testing.T) {
-			root, store := dbtest.QoderTitleRoot(t)
-			transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-			dbtest.SetQoderTitle(t, store, "First")
-			archive := dbtest.OpenTestDB(t)
-			engine := newQoderTitleEngine(t, archive, root)
-			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-
-			incompatible := filepath.Join(t.TempDir(), parser.QoderTitleDBName)
-			conn, err := sql.Open("sqlite3", incompatible)
-			require.NoError(t, err)
-			_, err = conn.ExecContext(t.Context(), schema)
-			require.NoError(t, err)
-			require.NoError(t, conn.Close())
-			data, err := os.ReadFile(incompatible)
-			require.NoError(t, err)
-			require.NoError(t, os.WriteFile(store, data, 0o644))
-			engine.SyncAll(t.Context(), nil)
-			assert.Equal(t, new("First"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
-				"an unreadable store leaves the stored title alone")
-		})
-	}
-}
-
 // TestQoderStoreTitlesOnlySessionsItOwns keeps one root's database from
 // renaming a session that another root's copy of the same ID belongs to.
 func TestQoderStoreTitlesOnlySessionsItOwns(t *testing.T) {
-	qoderRequired(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	bound := filepath.Join(home, ".qoder", "projects")
 	require.NoError(t, os.MkdirAll(bound, 0o755))
 	store, ok := parser.QoderTitleDatabase(bound)
@@ -255,77 +201,6 @@ func TestQoderDisplayNameOutranksNativeTitle(t *testing.T) {
 	assert.Equal(t, new("Renamed by user"), session.DisplayName)
 }
 
-// TestQoderBlankRowDoesNotLoseStoredNameToSidecar covers the one blank-title
-// case reconciliation cannot heal: the app held a title, its row goes blank,
-// and an older export snapshot is still beside the transcript.
-func TestQoderBlankRowDoesNotLoseStoredNameToSidecar(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	require.NoError(t, os.WriteFile(
-		strings.TrimSuffix(transcript, ".jsonl")+"-session.json",
-		[]byte(`{"title":"Name from export"}`), 0o644,
-	))
-	dbtest.SetQoderTitle(t, store, "Name in the app")
-	archive := dbtest.OpenTestDB(t)
-	engine := newQoderTitleEngine(t, archive, root)
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	id := "qoder:" + dbtest.QoderTitleID
-	before, err := archive.GetSessionFull(t.Context(), id)
-	require.NoError(t, err)
-	require.Equal(t, new("Name in the app"), before.SessionName)
-
-	dbtest.SetQoderTitle(t, store, "   ")
-	body, err := os.ReadFile(transcript)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(transcript,
-		append(body, []byte(`{"type":"user","uuid":"u2","timestamp":"2026-06-04T09:48:27.966Z","message":{"role":"user","content":"keep going"},"sessionId":"`+
-			dbtest.QoderTitleID+`"}`+"\n")...), 0o644))
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-
-	after, err := archive.GetSessionFull(t.Context(), id)
-	require.NoError(t, err)
-	assert.Equal(t, new("Name in the app"), after.SessionName,
-		"a blank row must not hand the name back to the export snapshot")
-	assert.NotEqual(t, before.FileHash, after.FileHash, "the transcript really reparsed")
-}
-
-// TestQoderUnreadableStoreKeepsStoredName covers the last state in which the
-// database supplies no usable title: it cannot be read. The failure may be
-// permanent - a schema the reader does not understand survives every retry -
-// so the export snapshot stays initial-import metadata rather than a signal,
-// and a database that becomes readable again still applies its title.
-func TestQoderUnreadableStoreKeepsStoredName(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	require.NoError(t, os.WriteFile(
-		strings.TrimSuffix(transcript, ".jsonl")+"-session.json",
-		[]byte(`{"title":"Name from export"}`), 0o644,
-	))
-	dbtest.SetQoderTitle(t, store, "Name in the app")
-	archive := dbtest.OpenTestDB(t)
-	engine := newQoderTitleEngine(t, archive, root)
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	require.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
-
-	original, err := os.ReadFile(store)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o644))
-	body, err := os.ReadFile(transcript)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(transcript,
-		append(body, []byte(`{"type":"user","uuid":"u2","timestamp":"2026-06-04T09:48:27.966Z","message":{"role":"user","content":"keep going"},"sessionId":"`+
-			dbtest.QoderTitleID+`"}`+"\n")...), 0o644))
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
-		"an unreadable database must not hand the name to the export snapshot")
-
-	require.NoError(t, os.WriteFile(store, original, 0o600))
-	dbtest.SetQoderTitle(t, store, "Renamed while unreadable")
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-	assert.Equal(t, new("Renamed while unreadable"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
-		"a database that becomes readable again still applies its title")
-}
-
 func TestQoderDisabledProvidersStayIndependent(t *testing.T) {
 	qoderRoot, qoderStore := dbtest.QoderTitleRoot(t)
 	antigravityRoot := t.TempDir()
@@ -431,36 +306,60 @@ func TestQoderUsageOnlyArchiveSkipsTitleStore(t *testing.T) {
 		"a usage-only pass is a no-op and never reads the store")
 }
 
-// TestQoderRemovedRowKeepsStoredName covers the second half of the "no usable
-// database title" rule: the row is gone entirely, so reconciliation has nothing
-// to restore from and the export snapshot must not take its place.
-func TestQoderRemovedRowKeepsStoredName(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
+func TestQoderUnavailableTitleKeepsStoredName(t *testing.T) {
+	for _, state := range []string{"blank row", "removed row", "unreadable file"} {
+		t.Run(state, func(t *testing.T) {
+			root, store := dbtest.QoderTitleRoot(t)
+			transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
+			require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Name from export"}`), 0o644))
+			dbtest.SetQoderTitle(t, store, "Name in the app")
+			archive := dbtest.OpenTestDB(t)
+			engine := newQoderTitleEngine(t, archive, root)
+			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+			require.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+			original, err := os.ReadFile(store)
+			require.NoError(t, err)
+			switch state {
+			case "blank row":
+				dbtest.SetQoderTitle(t, store, "   ")
+			case "removed row":
+				conn, err := sql.Open("sqlite3", store)
+				require.NoError(t, err)
+				_, err = conn.ExecContext(t.Context(), "DELETE FROM chat_sessions WHERE session_id = ?", dbtest.QoderTitleID)
+				require.NoError(t, err)
+				require.NoError(t, conn.Close())
+			case "unreadable file":
+				require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o644))
+			}
+			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
+			assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+			transcript = dbtest.WriteQoderTitleTranscript(t, root, "changed transcript")
+			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+			session, err := archive.GetSessionFull(t.Context(), "qoder:"+dbtest.QoderTitleID)
+			require.NoError(t, err)
+			assert.Equal(t, new("changed transcript"), session.FirstMessage)
+			assert.Equal(t, new("Name in the app"), session.SessionName)
+			require.NoError(t, os.WriteFile(store, original, 0o600))
+			dbtest.SetQoderTitle(t, store, "Recovered rename")
+			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
+			assert.Equal(t, new("Recovered rename"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+		})
+	}
+}
+
+func TestQoderMissingDatabaseFollowsSidecarUpdates(t *testing.T) {
+	root, _ := dbtest.QoderTitleRoot(t)
 	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	require.NoError(t, os.WriteFile(
-		strings.TrimSuffix(transcript, ".jsonl")+"-session.json",
-		[]byte(`{"title":"Name from export"}`), 0o644,
-	))
-	dbtest.SetQoderTitle(t, store, "Name in the app")
+	sidecar := strings.TrimSuffix(transcript, ".jsonl") + "-session.json"
 	archive := dbtest.OpenTestDB(t)
 	engine := newQoderTitleEngine(t, archive, root)
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	require.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
-
-	conn, err := sql.Open("sqlite3", store)
-	require.NoError(t, err)
-	_, err = conn.ExecContext(t.Context(),
-		"DELETE FROM chat_sessions WHERE session_id = ?", dbtest.QoderTitleID)
-	require.NoError(t, err)
-	require.NoError(t, conn.Close())
-
-	body, err := os.ReadFile(transcript)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(transcript,
-		append(body, []byte(`{"type":"user","uuid":"u2","timestamp":"2026-06-04T09:48:27.966Z","message":{"role":"user","content":"keep going"},"sessionId":"`+
-			dbtest.QoderTitleID+`"}`+"\n")...), 0o644))
-	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-
-	assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
-		"a removed row must not hand the name back to the export snapshot")
+	for _, title := range []string{"First", "Renamed", ""} {
+		require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"`+title+`"}`), 0o644))
+		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))
+		if title == "" {
+			assert.Nil(t, qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+		} else {
+			assert.Equal(t, &title, qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+		}
+	}
 }

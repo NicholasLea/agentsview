@@ -9,17 +9,11 @@ import (
 // conversation titles, apart from each conversation's transcript.
 const AntigravitySummariesDBName = "conversation_summaries.db"
 
-var antigravityTitleStore = sqliteTitleStore{
-	query: "SELECT conversation_id, title FROM conversation_summaries",
-}
-
-func InvalidateAntigravityTitles(path string) {
-	invalidateSQLiteTitles(path)
-}
+const antigravityTitleQuery = "SELECT conversation_id, title FROM conversation_summaries"
 
 // Matching markers can hide writes, so cached titles expire.
 func AntigravityStoreTitles(ctx context.Context, path string) (map[string]string, SQLiteContainerState, error) {
-	return sqliteStoreTitles(ctx, path, antigravityTitleStore)
+	return sqliteStoreTitles(ctx, path, antigravityTitleQuery)
 }
 
 // AntigravitySessionRoot returns the Antigravity root that owns a stored

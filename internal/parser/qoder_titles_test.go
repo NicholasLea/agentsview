@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -18,21 +17,14 @@ import (
 // international session root together with the application database it binds.
 func qoderTitleHome(t *testing.T) (root, store string) {
 	t.Helper()
-	qoderRequired(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	root = filepath.Join(home, ".qoder", "projects")
 	require.NoError(t, os.MkdirAll(root, 0o755))
 	store, ok := QoderTitleDatabase(root)
 	require.True(t, ok)
 	return root, store
-}
-
-func qoderRequired(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skip("the Qoder title database path is macOS only")
-	}
 }
 
 func readTitles(t *testing.T, store string) map[string]string {
@@ -75,68 +67,12 @@ func TestQoderStoreTitles(t *testing.T) {
 	assert.Empty(t, empty)
 }
 
-// sealStore makes the directory around store unwritable, so a read-only open
-// that must create the missing WAL siblings fails instead of quietly making
-// them. Cleanup restores the mode ahead of the temp-dir removal.
-func sealStore(t *testing.T, store string) {
-	t.Helper()
-	dir := filepath.Dir(store)
-	require.NoError(t, os.Chmod(store, 0o400))
-	require.NoError(t, os.Chmod(dir, 0o500))
-	t.Cleanup(func() {
-		require.NoError(t, os.Chmod(dir, 0o700))
-		require.NoError(t, os.Chmod(store, 0o600))
-	})
-}
-
-// ordinaryReadOnlyTitle is the open the stable-snapshot fallback replaces: the
-// same DSN without immutable, so it needs write access to the directory.
-func ordinaryReadOnlyTitle(t *testing.T, store string) error {
-	t.Helper()
-	db, err := openSQLiteReadOnly(store, sqliteReadOptions{busyTimeoutMS: 3000})
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	var title string
-	return db.QueryRowContext(t.Context(),
-		"SELECT title FROM chat_sessions WHERE session_id = 'id'").Scan(&title)
-}
-
-func TestQoderStoreTitlesOpenModes(t *testing.T) {
-	t.Run("no wal siblings", func(t *testing.T) {
-		_, store := qoderTitleHome(t)
-		testjsonl.SetQoderTitle(t, store, "id", "First")
-		closeWALStore(t, store)
-		sealStore(t, store)
-		require.Error(t, ordinaryReadOnlyTitle(t, store),
-			"the sealed fixture must really deny the open the fallback replaces")
-		assert.Equal(t, "First", readTitles(t, store)["id"])
-	})
-	t.Run("reader created empty wal", func(t *testing.T) {
-		_, store := qoderTitleHome(t)
-		testjsonl.SetQoderTitle(t, store, "id", "First")
-		closeWALStore(t, store)
-		require.NoError(t, os.WriteFile(store+"-wal", nil, 0o600))
-		sealStore(t, store)
-		require.Error(t, ordinaryReadOnlyTitle(t, store),
-			"the sealed fixture must really deny the open the fallback replaces")
-		assert.Equal(t, "First", readTitles(t, store)["id"])
-	})
-	t.Run("wal with frames", func(t *testing.T) {
-		_, store := qoderTitleHome(t)
-		testjsonl.SetQoderTitle(t, store, "id", "First")
-		conn, err := sql.Open("sqlite3", store)
-		require.NoError(t, err)
-		defer conn.Close()
-		_, err = conn.ExecContext(t.Context(), "PRAGMA journal_mode=WAL")
-		require.NoError(t, err)
-		_, err = conn.ExecContext(t.Context(),
-			"UPDATE chat_sessions SET title = 'Later' WHERE session_id = 'id'")
-		require.NoError(t, err)
-		require.True(t, sqliteWALHasFrames(store+"-wal"), "the write must stay in the WAL")
-		assert.Equal(t, "Later", readTitles(t, store)["id"])
-	})
+// A closed Qoder database can retain WAL mode without sibling files.
+func TestQoderStoreTitlesWithoutWALSiblings(t *testing.T) {
+	_, store := qoderTitleHome(t)
+	testjsonl.SetQoderTitle(t, store, "id", "First")
+	closeWALStore(t, store)
+	assert.Equal(t, "First", readTitles(t, store)["id"])
 }
 
 func TestQoderStoreTitlesErrors(t *testing.T) {
@@ -179,9 +115,9 @@ func TestQoderStoreTitlesErrors(t *testing.T) {
 }
 
 func TestQoderTitleDatabase(t *testing.T) {
-	qoderRequired(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	for _, tc := range []struct {
 		name string
 		root string
@@ -251,59 +187,47 @@ func TestQoderSessionRoot(t *testing.T) {
 func TestQoderParseTitlePrecedence(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
-		store       string
-		sidecar     string
+		database    bool
+		row         string
+		sidecar     bool
+		rename      bool
 		wantName    string
 		wantPresent bool
 	}{
-		{
-			name:        "database outranks sidecar",
-			store:       "From database",
-			sidecar:     `{"title":"From sidecar"}`,
-			wantName:    "From database",
-			wantPresent: true,
-		},
-		{
-			// With no row the snapshot is only initial-import metadata: an update
-			// keeps whatever name is already stored.
-			name:        "sidecar only",
-			sidecar:     `{"title":"From sidecar"}`,
-			wantName:    "From sidecar",
-			wantPresent: false,
-		},
-		{
-			// A blank row is the database saying it has no title. The snapshot
-			// survives as fallback for a first import but claims no signal, so it
-			// cannot replace a name the database supplied earlier.
-			name:        "blank database row demotes sidecar",
-			store:       "   ",
-			sidecar:     `{"title":"From sidecar"}`,
-			wantName:    "From sidecar",
-			wantPresent: false,
-		},
-		{
-			name:        "no signal",
-			wantPresent: false,
-		},
+		{"database beats both files", true, "From database", true, true, "From database", true},
+		{"missing database sidecar", false, "", true, false, "From sidecar", true},
+		{"missing database rename", false, "", false, true, "Renamed in chat", true},
+		{"missing database both files", false, "", true, true, "From sidecar", true},
+		{"missing database no title", false, "", false, false, "", true},
+		{"no row sidecar", true, "", true, false, "From sidecar", false},
+		{"no row rename", true, "", false, true, "Renamed in chat", true},
+		{"no row both files", true, "", true, true, "From sidecar", false},
+		{"no row no title", true, "", false, false, "", false},
+		{"blank row sidecar", true, "   ", true, false, "From sidecar", false},
+		{"blank row rename", true, "   ", false, true, "Renamed in chat", true},
+		{"blank row both files", true, "   ", true, true, "From sidecar", false},
+		{"blank row no title", true, "   ", false, false, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, store := qoderTitleHome(t)
-			if tc.store != "" {
-				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, tc.store)
+			if tc.database {
+				testjsonl.SetQoderTitle(t, store, "other", "Other session")
+			}
+			if tc.row != "" {
+				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, tc.row)
 			}
 			path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
-			if tc.sidecar != "" {
-				require.NoError(t, os.WriteFile(
-					path[:len(path)-len(".jsonl")]+"-session.json",
-					[]byte(tc.sidecar), 0o644,
-				))
+			if tc.rename {
+				require.NoError(t, os.WriteFile(path, append(mustRead(t, path), []byte(testjsonl.QoderCustomTitleJSON(testjsonl.QoderTitleID, "Renamed in chat")+"\n")...), 0o644))
+			}
+			if tc.sidecar {
+				require.NoError(t, os.WriteFile(strings.TrimSuffix(path, ".jsonl")+"-session.json", []byte(`{"title":"From sidecar"}`), 0o644))
 			}
 			results, err := ParseQoderSession(path, "sample-project", "local")
 			require.NoError(t, err)
 			require.Len(t, results, 1)
-			sess := results[0].Session
-			assert.Equal(t, tc.wantName, sess.SessionName)
-			assert.Equal(t, tc.wantPresent, sess.SessionNamePresent)
+			assert.Equal(t, tc.wantName, results[0].Session.SessionName)
+			assert.Equal(t, tc.wantPresent, results[0].Session.SessionNamePresent)
 		})
 	}
 }
@@ -356,26 +280,14 @@ func TestQoderSubagentTranscriptIsNotTitled(t *testing.T) {
 	require.NotEmpty(t, results, "the transcript must parse into a session to prove it stayed untitled")
 	for _, result := range results {
 		assert.Empty(t, result.Session.SessionName)
-		assert.False(t, result.Session.SessionNamePresent)
+		assert.True(t, result.Session.SessionNamePresent)
 	}
 }
 
 func TestQoderInChatRenameIsATitleSignal(t *testing.T) {
 	root, store := qoderTitleHome(t)
-	path := filepath.Join(
-		root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID+".jsonl",
-	)
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	writeRename := func(t *testing.T) {
-		t.Helper()
-		require.NoError(t, os.WriteFile(path, []byte(
-			`{"type":"user","uuid":"u1","timestamp":"2026-06-04T09:47:27.966Z","message":{"role":"user","content":"help me"},"sessionId":"`+
-				testjsonl.QoderTitleID+`"}`+"\n"+
-				`{"type":"custom-title","customTitle":"Renamed in chat","sessionId":"`+
-				testjsonl.QoderTitleID+`"}`+"\n",
-		), 0o644))
-	}
-	writeRename(t)
+	path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help me")
+	require.NoError(t, os.WriteFile(path, append(mustRead(t, path), []byte(testjsonl.QoderCustomTitleJSON(testjsonl.QoderTitleID, "Renamed in chat")+"\n")...), 0o644))
 	results, err := ParseQoderSession(path, "sample-project", "local")
 	require.NoError(t, err)
 	require.Len(t, results, 1)
@@ -431,7 +343,7 @@ func TestQoderParseMaterializedRemoteSource(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Empty(t, results[0].Session.SessionName)
-	assert.False(t, results[0].Session.SessionNamePresent)
+	assert.True(t, results[0].Session.SessionNamePresent)
 }
 
 // TestQoderTitleTargetsOnlyTheFilesOwnSession covers a transcript that yields
@@ -450,7 +362,7 @@ func TestQoderTitleTargetsOnlyTheFilesOwnSession(t *testing.T) {
 	}
 	applyQoderTitles(t.Context(), results, filepath.Join(
 		root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID+".jsonl",
-	))
+	), false)
 	assert.Equal(t, "Own title", results[0].Session.SessionName)
 	assert.True(t, results[0].Session.SessionNamePresent)
 	assert.Empty(t, results[1].Session.SessionName)
@@ -520,64 +432,6 @@ func TestQoderTitleSharesCacheWithAntigravity(t *testing.T) {
 	antigravityTitles, _, err := AntigravityStoreTitles(t.Context(), antigravityStore)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"shared-id": "Real title"}, antigravityTitles)
-}
-
-// TestQoderBlankRowKeepsInChatRename covers the other half of the blank-row
-// rule: the database holding no title must not erase a rename the user recorded
-// in the transcript itself.
-func TestQoderBlankRowKeepsInChatRename(t *testing.T) {
-	root, store := qoderTitleHome(t)
-	path := filepath.Join(root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID+".jsonl")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	require.NoError(t, os.WriteFile(path, []byte(
-		`{"type":"user","uuid":"u1","timestamp":"2026-06-04T09:47:27.966Z","message":{"role":"user","content":"help me"},"sessionId":"`+
-			testjsonl.QoderTitleID+`"}`+"\n"+
-			`{"type":"custom-title","customTitle":"Renamed in chat","sessionId":"`+
-			testjsonl.QoderTitleID+`"}`+"\n",
-	), 0o644))
-	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "   ")
-	results, err := ParseQoderSession(path, "sample-project", "local")
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, "Renamed in chat", results[0].Session.SessionName)
-	assert.True(t, results[0].Session.SessionNamePresent,
-		"a blank row is not allowed to wipe an explicit rename")
-}
-
-// TestQoderRenameOutranksSidecar covers all three title sources at once. The
-// sidecar is a snapshot taken when the session was exported, so it cannot
-// outrank a rename the user recorded in the transcript, whether or not the
-// database holds the session.
-func TestQoderRenameOutranksSidecar(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		store string
-	}{
-		{name: "blank database row", store: "   "},
-		{name: "no database row", store: ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root, store := qoderTitleHome(t)
-			if tc.store != "" {
-				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, tc.store)
-			}
-			path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help me")
-			require.NoError(t, os.WriteFile(path,
-				append(mustRead(t, path), []byte(
-					`{"type":"custom-title","customTitle":"Renamed in chat","sessionId":"`+
-						testjsonl.QoderTitleID+`"}`+"\n")...), 0o644))
-			require.NoError(t, os.WriteFile(
-				strings.TrimSuffix(path, ".jsonl")+"-session.json",
-				[]byte(`{"title":"Name from export"}`), 0o644,
-			))
-			results, err := ParseQoderSession(path, "sample-project", "local")
-			require.NoError(t, err)
-			require.Len(t, results, 1)
-			assert.Equal(t, "Renamed in chat", results[0].Session.SessionName,
-				"the export snapshot must not replace a rename recorded in the transcript")
-			assert.True(t, results[0].Session.SessionNamePresent)
-		})
-	}
 }
 
 func mustRead(t *testing.T, path string) []byte {

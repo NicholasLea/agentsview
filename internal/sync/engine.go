@@ -588,8 +588,7 @@ type Engine struct {
 	deferredNativeTitles map[string]*string
 	// Applied title-store state is tracked per agent so disabling one
 	// provider cannot suppress the other's refresh.
-	appliedAntigravityTitles map[string]appliedNativeTitleStore
-	appliedQoderTitles       map[string]appliedNativeTitleStore
+	appliedNativeTitles map[parser.AgentType]map[string]appliedNativeTitleStore
 	// sourceSet holds the provider set and session roots this engine
 	// discovers from. ReconfigureSources replaces it as one snapshot.
 	sourceSet atomic.Pointer[engineSources]

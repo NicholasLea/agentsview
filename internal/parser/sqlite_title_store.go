@@ -25,24 +25,8 @@ var sqliteTitleCache = struct {
 	stores map[string]sqliteTitleSnapshot
 }{stores: make(map[string]sqliteTitleSnapshot)}
 
-// sqliteTitleStore describes how to read one agent-owned title database.
-// A store path is only ever read through one of these, so the cache can be
-// keyed by path alone.
-type sqliteTitleStore struct {
-	// query selects (session id, title) rows.
-	query string
-	// immutableWhenWALEmpty opens a snapshot without WAL locking once the
-	// sibling WAL carries no frames. Qoder's database sits in an Electron
-	// user-data directory and may have no `-wal`/`-shm` siblings at all when
-	// the app is not running, which plain `mode=ro` refuses to open.
-	//
-	// shortcut: the app can create its first `-wal` between the check and the
-	// read, so this open may see a torn page. A read error keeps the stored
-	// title, and the 5-minute expiry re-reads on the next pass.
-	immutableWhenWALEmpty bool
-}
-
-func invalidateSQLiteTitles(path string) {
+// InvalidateSQLiteTitles drops the cached read of a native title database.
+func InvalidateSQLiteTitles(path string) {
 	sqliteTitleCache.Lock()
 	defer sqliteTitleCache.Unlock()
 	delete(sqliteTitleCache.stores, path)
@@ -52,7 +36,7 @@ func invalidateSQLiteTitles(path string) {
 // while the container state matches. Matching markers can hide writes, so
 // cached titles expire.
 func sqliteStoreTitles(
-	ctx context.Context, path string, store sqliteTitleStore,
+	ctx context.Context, path, query string,
 ) (map[string]string, SQLiteContainerState, error) {
 	state, ok := StatSQLiteContainerState(path)
 	sqliteTitleCache.Lock()
@@ -63,7 +47,7 @@ func sqliteStoreTitles(
 		now.Sub(prior.readAt) < SQLiteContainerDigestVerifyInterval {
 		return prior.titles, prior.state, prior.err
 	}
-	titles, err := readSQLiteTitles(ctx, path, store)
+	titles, err := readSQLiteTitles(ctx, path, query)
 	if ctx.Err() != nil {
 		return nil, state, ctx.Err()
 	}
@@ -82,22 +66,18 @@ func sqliteStoreTitles(
 }
 
 func readSQLiteTitles(
-	ctx context.Context, path string, store sqliteTitleStore,
+	ctx context.Context, path, query string,
 ) (map[string]string, error) {
 	if !IsRegularFile(path) {
 		return nil, nil
 	}
 	observeSharedContainerScan(ctx)
-	options := sqliteReadOptions{busyTimeoutMS: 3000}
-	if store.immutableWhenWALEmpty && !sqliteWALHasFrames(path+"-wal") {
-		options = sqliteReadOptions{stableSnapshot: true}
-	}
-	db, err := openSQLiteReadOnly(path, options)
+	db, err := openSQLiteReadOnly(path, sqliteReadOptions{busyTimeoutMS: 3000})
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.QueryContext(ctx, store.query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
