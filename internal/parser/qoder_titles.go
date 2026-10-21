@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // QoderTitleDBName is the database where the Qoder IDE stores session titles.
@@ -26,7 +27,20 @@ const qoderTitleQuery = "SELECT session_id, title FROM chat_sessions"
 
 // QoderStoreTitles reads the titles from one Qoder application database.
 func QoderStoreTitles(ctx context.Context, path string) (map[string]string, SQLiteContainerState, error) {
-	return sqliteStoreTitles(ctx, path, qoderTitleQuery)
+	return qoderSchemalessTitles(sqliteStoreTitles(ctx, path, qoderTitleQuery))
+}
+
+// qoderSchemalessTitles reports an application database without a
+// chat_sessions title schema as holding no titles, so a general app database
+// without them is not a read failure.
+func qoderSchemalessTitles(
+	titles map[string]string, state SQLiteContainerState, err error,
+) (map[string]string, SQLiteContainerState, error) {
+	if err != nil && (strings.Contains(err.Error(), "no such table: chat_sessions") ||
+		strings.Contains(err.Error(), "no such column:")) {
+		return nil, state, nil
+	}
+	return titles, state, err
 }
 
 // QoderSessionRoot returns the Qoder session root that owns a transcript path,
