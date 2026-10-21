@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -185,11 +184,11 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		{"missing database sidecar", false, "", true, false, "From sidecar", true, false},
 		{"missing database rename", false, "", false, true, "Renamed in chat", true, false},
 		{"missing database both files", false, "", true, true, "From sidecar", true, false},
-		{"missing database no title", false, "", false, false, "", true, false},
+		{"missing database no title", false, "", false, false, "", false, false},
 		{"no row sidecar", true, "", true, false, "From sidecar", true, false},
 		{"no row rename", true, "", false, true, "Renamed in chat", true, false},
 		{"no row both files", true, "", true, true, "From sidecar", true, false},
-		{"no row no title", true, "", false, false, "", true, false},
+		{"no row no title", true, "", false, false, "", false, false},
 		{"blank row sidecar", true, "   ", true, false, "From sidecar", false, false},
 		{"blank row rename", true, "   ", false, true, "Renamed in chat", false, false},
 		{"blank row both files", true, "   ", true, true, "From sidecar", false, false},
@@ -251,7 +250,7 @@ func TestQoderParseSurvivesCorruptSidecar(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, results, 1)
 		assert.Empty(t, results[0].Session.SessionName)
-		assert.True(t, results[0].Session.SessionNamePresent)
+		assert.False(t, results[0].Session.SessionNamePresent)
 	})
 }
 
@@ -274,7 +273,7 @@ func TestQoderSubagentTranscriptIsNotTitled(t *testing.T) {
 	require.NotEmpty(t, results, "the transcript must parse into a session to prove it stayed untitled")
 	for _, result := range results {
 		assert.Empty(t, result.Session.SessionName)
-		assert.True(t, result.Session.SessionNamePresent)
+		assert.False(t, result.Session.SessionNamePresent)
 	}
 }
 
@@ -337,7 +336,7 @@ func TestQoderParseMaterializedRemoteSource(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Empty(t, results[0].Session.SessionName)
-	assert.True(t, results[0].Session.SessionNamePresent)
+	assert.False(t, results[0].Session.SessionNamePresent)
 }
 
 // TestQoderTitleTargetsOnlyTheFilesOwnSession covers a transcript that yields
@@ -393,16 +392,19 @@ func TestQoderWatchPlanIncludesTitleStoreDirectory(t *testing.T) {
 func TestQoderStoreTitlesCacheReuseAndRefresh(t *testing.T) {
 	_, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, "id", "First")
-	cached := readTitles(t, store)
-	require.Equal(t, "First", cached["id"])
-	reused, _, err := QoderStoreTitles(t.Context(), store)
-	require.NoError(t, err)
-	// An unchanged container state inside the verify interval reuses the read.
-	assert.Equal(t,
-		reflect.ValueOf(cached).Pointer(), reflect.ValueOf(reused).Pointer(),
-		"the cached map must be returned, not re-read")
+	scans := 0
+	ctx := WithSharedContainerScanObserver(t.Context(), func() { scans++ })
+	for range 2 {
+		titles, _, err := QoderStoreTitles(ctx, store)
+		require.NoError(t, err)
+		assert.Equal(t, "First", titles["id"])
+	}
+	assert.Equal(t, 1, scans, "unchanged reads within the verify interval scan once")
 	testjsonl.SetQoderTitle(t, store, "id", "Later")
-	assert.Equal(t, "Later", readTitles(t, store)["id"])
+	titles, _, err := QoderStoreTitles(ctx, store)
+	require.NoError(t, err)
+	assert.Equal(t, "Later", titles["id"])
+	assert.Equal(t, 2, scans, "a changed store triggers another scan")
 }
 
 func TestQoderTitleSharesCacheWithAntigravity(t *testing.T) {

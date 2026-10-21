@@ -50,19 +50,19 @@ func qoderStoredTitle(t *testing.T, archive *db.DB, id string) *string {
 }
 
 func TestQoderTitlesFollowStore(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	dbtest.SetQoderTitle(t, store, "First")
+	root, store := testjsonl.QoderTitleRoot(t)
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
 	archive := dbtest.OpenTestDB(t)
 	engine := newQoderTitleEngine(t, archive, root)
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	require.Equal(t, new("First"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
-	before, err := archive.GetSessionFull(t.Context(), "qoder:"+dbtest.QoderTitleID)
+	require.Equal(t, new("First"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+	before, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
 	require.NoError(t, err)
 
-	dbtest.SetQoderTitle(t, store, "Renamed in Qoder")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in Qoder")
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-	after, err := archive.GetSessionFull(t.Context(), "qoder:"+dbtest.QoderTitleID)
+	after, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
 	require.NoError(t, err)
 	assert.Equal(t, new("Renamed in Qoder"), after.SessionName)
 	assert.Equal(t, 1, engine.LastSyncStats().TitlesUpdated)
@@ -74,17 +74,17 @@ func TestQoderTitlesFollowStore(t *testing.T) {
 // TestQoderFullSyncBackfillsTitles covers sessions ingested while Qoder held
 // the database busy, and a store created only after AgentsView started.
 func TestQoderFullSyncBackfillsTitles(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
+	root, store := testjsonl.QoderTitleRoot(t)
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
 	archive := dbtest.OpenTestDB(t)
 	engine := newQoderTitleEngine(t, archive, root)
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	require.Nil(t, qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+	require.Nil(t, qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 
-	dbtest.SetQoderTitle(t, store, "Saved while closed")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Saved while closed")
 	engine.SyncAll(t.Context(), nil)
 	assert.Equal(t, new("Saved while closed"),
-		qoderStoredTitle(t, archive, dbtest.QoderTitleID),
+		qoderStoredTitle(t, archive, testjsonl.QoderTitleID),
 		"existing sessions pick up titles without a transcript change")
 }
 
@@ -125,49 +125,49 @@ func TestQoderTitleRenamesRespectCwdFilter(t *testing.T) {
 		{name: "allowed", want: "Later"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root, store := dbtest.QoderTitleRoot(t)
+			root, store := testjsonl.QoderTitleRoot(t)
 			workspace := t.TempDir()
-			transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-			dbtest.SetQoderTitle(t, store, "First")
+			transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+			testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
 			archive := dbtest.OpenTestDB(t)
 			require.NoError(t, newQoderTitleEngine(t, archive, root).
 				SyncPathsContext(t.Context(), []string{transcript}))
 			require.NoError(t, archive.UpdateSessionCwd(t.Context(),
-				"qoder:"+dbtest.QoderTitleID, filepath.Join(workspace, tc.name)))
+				"qoder:"+testjsonl.QoderTitleID, filepath.Join(workspace, tc.name)))
 			allowed := filepath.Join(workspace, "allowed")
 			engine := newQoderEngine(t, archive, sync.EngineConfig{
 				AgentDirs:          map[parser.AgentType][]string{parser.AgentQoder: {root}},
 				Machine:            "host-a",
 				IncludeCwdPrefixes: []string{allowed},
 			})
-			dbtest.SetQoderTitle(t, store, "Later")
+			testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Later")
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-			assert.Equal(t, new(tc.want), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+			assert.Equal(t, new(tc.want), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 		})
 	}
 }
 
 func TestQoderTrashedSessionRestoresWithCurrentTitle(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	dbtest.SetQoderTitle(t, store, "First")
+	root, store := testjsonl.QoderTitleRoot(t)
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
 	archive := dbtest.OpenTestDB(t)
 	engine := newQoderTitleEngine(t, archive, root)
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	id := "qoder:" + dbtest.QoderTitleID
+	id := "qoder:" + testjsonl.QoderTitleID
 
 	require.NoError(t, archive.SoftDeleteSession(t.Context(), id))
-	dbtest.SetQoderTitle(t, store, "Renamed in trash")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in trash")
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
 	_, err := archive.RestoreSession(t.Context(), id)
 	require.NoError(t, err)
-	assert.Equal(t, new("Renamed in trash"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+	assert.Equal(t, new("Renamed in trash"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 }
 
 func TestQoderRebuildKeepsRenamesOfSessionsWithoutTranscript(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	dbtest.SetQoderTitle(t, store, "First")
+	root, store := testjsonl.QoderTitleRoot(t)
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
 	archive := dbtest.OpenTestDB(t)
 	engine := newQoderTitleEngine(t, archive, root)
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
@@ -175,24 +175,24 @@ func TestQoderRebuildKeepsRenamesOfSessionsWithoutTranscript(t *testing.T) {
 	require.NoError(t, os.Remove(transcript))
 	testjsonl.WriteQoderTranscript(t, root,
 		"22222222-3333-4333-9333-444444444444", "still here")
-	dbtest.SetQoderTitle(t, store, "Later")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Later")
 	stats := engine.ResyncAll(t.Context(), nil)
 	require.False(t, stats.Aborted)
-	assert.Equal(t, new("Later"), qoderStoredTitle(t, archive, dbtest.QoderTitleID),
+	assert.Equal(t, new("Later"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID),
 		"an orphan copy must not restore an older title")
 }
 
 func TestQoderDisplayNameOutranksNativeTitle(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	dbtest.SetQoderTitle(t, store, "First")
+	root, store := testjsonl.QoderTitleRoot(t)
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
 	archive := dbtest.OpenTestDB(t)
 	engine := newQoderTitleEngine(t, archive, root)
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-	id := "qoder:" + dbtest.QoderTitleID
+	id := "qoder:" + testjsonl.QoderTitleID
 	require.NoError(t, archive.RenameSession(t.Context(), id, new("Renamed by user")))
 
-	dbtest.SetQoderTitle(t, store, "Renamed in Qoder")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in Qoder")
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
 	session, err := archive.GetSessionFull(t.Context(), id)
 	require.NoError(t, err)
@@ -202,11 +202,11 @@ func TestQoderDisplayNameOutranksNativeTitle(t *testing.T) {
 }
 
 func TestQoderDisabledProvidersStayIndependent(t *testing.T) {
-	qoderRoot, qoderStore := dbtest.QoderTitleRoot(t)
+	qoderRoot, qoderStore := testjsonl.QoderTitleRoot(t)
 	antigravityRoot := t.TempDir()
-	qoderTranscript := dbtest.WriteQoderTitleTranscript(t, qoderRoot, "hello")
+	qoderTranscript := testjsonl.WriteQoderTranscript(t, qoderRoot, testjsonl.QoderTitleID, "hello")
 	antigravityTranscript := dbtest.WriteAntigravityTitleTranscript(t, antigravityRoot, "hello")
-	dbtest.SetQoderTitle(t, qoderStore, "Qoder title")
+	testjsonl.SetQoderTitle(t, qoderStore, testjsonl.QoderTitleID, "Qoder title")
 	dbtest.SetAntigravityTitle(t, antigravityRoot, "Antigravity title")
 	archive := dbtest.OpenTestDB(t)
 	both := map[parser.AgentType][]string{
@@ -222,10 +222,10 @@ func TestQoderDisabledProvidersStayIndependent(t *testing.T) {
 			Machine:        "host-a",
 			DisabledAgents: []parser.AgentType{parser.AgentAntigravity},
 		})
-		store := dbtest.SetQoderTitle(t, qoderStore, "Qoder renamed")
-		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
+		testjsonl.SetQoderTitle(t, qoderStore, testjsonl.QoderTitleID, "Qoder renamed")
+		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{qoderStore}))
 		assert.Equal(t, new("Qoder renamed"),
-			qoderStoredTitle(t, archive, dbtest.QoderTitleID),
+			qoderStoredTitle(t, archive, testjsonl.QoderTitleID),
 			"disabling Antigravity must not stop Qoder titles")
 	})
 	t.Run("qoder disabled", func(t *testing.T) {
@@ -248,10 +248,10 @@ func TestQoderDisabledProvidersStayIndependent(t *testing.T) {
 // other's row. Each engine ingests its own transcript, because one archive ends
 // up holding only one row for a transcript both engines are given.
 func TestQoderPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	remoteTranscript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
+	root, store := testjsonl.QoderTitleRoot(t)
+	remoteTranscript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
 	localTranscript := testjsonl.WriteQoderTranscript(t, root, qoderOtherTitleID, "other")
-	testjsonl.SetQoderTitle(t, store, dbtest.QoderTitleID, "First")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
 	testjsonl.SetQoderTitle(t, store, qoderOtherTitleID, "First")
 	archive := dbtest.OpenTestDB(t)
 	remote := newQoderEngine(t, archive, sync.EngineConfig{
@@ -262,7 +262,7 @@ func TestQoderPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
 	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{remoteTranscript}))
 	local := newQoderTitleEngine(t, archive, root)
 	require.NoError(t, local.SyncPathsContext(t.Context(), []string{localTranscript}))
-	prefixed := "host-b:qoder:" + dbtest.QoderTitleID
+	prefixed := "host-b:qoder:" + testjsonl.QoderTitleID
 	require.Equal(t, new("First"), qoderTitleForID(t, archive, prefixed))
 	require.Equal(t, new("First"), qoderStoredTitle(t, archive, qoderOtherTitleID))
 
@@ -271,7 +271,7 @@ func TestQoderPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
 	// The local row carries a pending title in the store: a pass that reached
 	// across the prefix would have somewhere to show up, and without it the
 	// sweep writes the name the row already holds and stays invisible.
-	testjsonl.SetQoderTitle(t, store, dbtest.QoderTitleID, "Renamed on host-b")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed on host-b")
 	testjsonl.SetQoderTitle(t, store, qoderOtherTitleID, "Pending for host-b")
 	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{store}))
 	assert.Equal(t, new("Renamed on host-b"), qoderTitleForID(t, archive, prefixed),
@@ -281,7 +281,7 @@ func TestQoderPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
 
 	// And the other way, with the same pending trick on the remote row.
 	testjsonl.SetQoderTitle(t, store, qoderOtherTitleID, "Renamed locally")
-	testjsonl.SetQoderTitle(t, store, dbtest.QoderTitleID, "Pending for host-a")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Pending for host-a")
 	require.NoError(t, local.SyncPathsContext(t.Context(), []string{store}))
 	assert.Equal(t, new("Renamed locally"), qoderStoredTitle(t, archive, qoderOtherTitleID))
 	assert.Equal(t, new("Renamed on host-b"), qoderTitleForID(t, archive, prefixed),
@@ -289,9 +289,9 @@ func TestQoderPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
 }
 
 func TestQoderUsageOnlyArchiveSkipsTitleStore(t *testing.T) {
-	root, store := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-	dbtest.SetQoderTitle(t, store, "First")
+	root, store := testjsonl.QoderTitleRoot(t)
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
 	archive := dbtest.OpenTestDB(t)
 	archive.SetArchiveContent(config.ArchiveContentUsage)
 	require.NoError(t, newQoderTitleEngine(t, archive, root).
@@ -309,64 +309,75 @@ func TestQoderUsageOnlyArchiveSkipsTitleStore(t *testing.T) {
 func TestQoderTitleFallbackOnReparse(t *testing.T) {
 	for _, tc := range []struct {
 		state, wantName string
+		fileTitle       bool
 	}{
-		{"blank row", "Name in the app"},
-		{"removed row", "Updated export"},
-		{"unreadable file", "Name in the app"},
+		{"blank row", "Name in the app", true},
+		{"removed row", "Updated export", true},
+		{"unreadable file", "Name in the app", true},
+		{"missing database no title", "Name in the app", false},
+		{"removed row no title", "Name in the app", false},
 	} {
 		t.Run(tc.state, func(t *testing.T) {
-			root, store := dbtest.QoderTitleRoot(t)
-			transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
-			require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Name from export"}`), 0o644))
-			dbtest.SetQoderTitle(t, store, "Name in the app")
+			root, store := testjsonl.QoderTitleRoot(t)
+			transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+			if tc.fileTitle {
+				require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Name from export"}`), 0o644))
+			}
+			testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Name in the app")
 			archive := dbtest.OpenTestDB(t)
 			engine := newQoderTitleEngine(t, archive, root)
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-			require.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+			require.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 			original, err := os.ReadFile(store)
 			require.NoError(t, err)
 			switch tc.state {
 			case "blank row":
-				dbtest.SetQoderTitle(t, store, "   ")
-			case "removed row":
+				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "   ")
+			case "missing database no title":
+				require.NoError(t, os.Remove(store))
+			case "removed row", "removed row no title":
 				conn, err := sql.Open("sqlite3", store)
 				require.NoError(t, err)
-				_, err = conn.ExecContext(t.Context(), "DELETE FROM chat_sessions WHERE session_id = ?", dbtest.QoderTitleID)
+				_, err = conn.ExecContext(t.Context(), "DELETE FROM chat_sessions WHERE session_id = ?", testjsonl.QoderTitleID)
 				require.NoError(t, err)
 				require.NoError(t, conn.Close())
 			case "unreadable file":
 				require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o644))
 			}
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-			assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
-			transcript = dbtest.WriteQoderTitleTranscript(t, root, "changed transcript")
-			require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Updated export"}`), 0o644))
+			assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+			transcript = testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "changed transcript")
+			if tc.fileTitle {
+				require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Updated export"}`), 0o644))
+			}
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-			session, err := archive.GetSessionFull(t.Context(), "qoder:"+dbtest.QoderTitleID)
+			session, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
 			require.NoError(t, err)
 			assert.Equal(t, new("changed transcript"), session.FirstMessage)
 			assert.Equal(t, new(tc.wantName), session.SessionName)
 			require.NoError(t, os.WriteFile(store, original, 0o600))
-			dbtest.SetQoderTitle(t, store, "Recovered rename")
+			testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Recovered rename")
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-			assert.Equal(t, new("Recovered rename"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
+			assert.Equal(t, new("Recovered rename"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 		})
 	}
 }
 
 func TestQoderMissingDatabaseFollowsSidecarUpdates(t *testing.T) {
-	root, _ := dbtest.QoderTitleRoot(t)
-	transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
+	root, _ := testjsonl.QoderTitleRoot(t)
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
 	sidecar := strings.TrimSuffix(transcript, ".jsonl") + "-session.json"
 	archive := dbtest.OpenTestDB(t)
 	engine := newQoderTitleEngine(t, archive, root)
-	for _, title := range []string{"First", "Renamed", ""} {
-		require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"`+title+`"}`), 0o644))
+	for _, tc := range []struct {
+		title, want string
+	}{
+		{"First", "First"},
+		{"Renamed", "Renamed"},
+		{"", "Renamed"},
+	} {
+		require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"`+tc.title+`"}`), 0o644))
 		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))
-		if title == "" {
-			assert.Nil(t, qoderStoredTitle(t, archive, dbtest.QoderTitleID))
-		} else {
-			assert.Equal(t, &title, qoderStoredTitle(t, archive, dbtest.QoderTitleID))
-		}
+		assert.Equal(t, new(tc.want), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
 	}
 }

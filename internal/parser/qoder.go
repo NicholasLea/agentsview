@@ -203,10 +203,10 @@ func ParseQoderSessionWithExclusions(
 	fileStem := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	for i := range results {
 		retagQoderResult(&results[i], fileStem, parentID, subagentID, isSubagent)
-		results[i].Session.SessionNamePresent = true
 		if !isSubagent {
 			applyQoderMeta(&results[i].Session, meta)
 		}
+		results[i].Session.SessionNamePresent = results[i].Session.SessionName != ""
 	}
 	if !isSubagent {
 		// After the sidecar pass, so a rename in the application database

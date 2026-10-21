@@ -18,8 +18,8 @@ var qoderTitleLayouts = []struct {
 	dotDir string
 	appID  string
 }{
-	{".qoder", "com.qoder.app.stable"},
-	{".qoder-cn", "com.qodercn.app.stable"},
+	{qoderDotDir, "com.qoder.app.stable"},
+	{qoderCNDotDir, "com.qodercn.app.stable"},
 }
 
 const qoderTitleQuery = "SELECT session_id, title FROM chat_sessions"
@@ -51,12 +51,13 @@ func isQoderSessionRoot(dir string) bool {
 	if base != "projects" {
 		return false
 	}
-	switch filepath.Base(filepath.Dir(dir)) {
-	case ".qoder", ".qoder-cn":
-		return true
-	default:
-		return false
+	dotDir := filepath.Base(filepath.Dir(dir))
+	for _, layout := range qoderTitleLayouts {
+		if dotDir == layout.dotDir {
+			return true
+		}
 	}
+	return false
 }
 
 // QoderTitleDatabase returns the application database holding titles for a
@@ -125,7 +126,7 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path, fileStem
 		return
 	}
 	store, ok := QoderTitleDatabase(root)
-	if !ok || !IsRegularFile(store) {
+	if !ok {
 		return
 	}
 	titles, _, err := QoderStoreTitles(ctx, store)
