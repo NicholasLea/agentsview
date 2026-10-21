@@ -140,27 +140,39 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		wantName    string
 		wantPresent bool
 		corrupt     bool
+		schema      string
 	}{
-		{"database beats both files", true, "From database", true, true, "From database", true, false},
-		{"missing database sidecar", false, "", true, false, "From sidecar", true, false},
-		{"missing database rename", false, "", false, true, "Renamed in chat", true, false},
-		{"missing database both files", false, "", true, true, "From sidecar", true, false},
-		{"missing database no title", false, "", false, false, "", false, false},
-		{"no row sidecar", true, "", true, false, "From sidecar", true, false},
-		{"no row rename", true, "", false, true, "Renamed in chat", true, false},
-		{"no row both files", true, "", true, true, "From sidecar", true, false},
-		{"no row no title", true, "", false, false, "", false, false},
-		{"blank row sidecar", true, "   ", true, false, "From sidecar", false, false},
-		{"blank row rename", true, "   ", false, true, "Renamed in chat", false, false},
-		{"blank row both files", true, "   ", true, true, "From sidecar", false, false},
-		{"blank row no title", true, "   ", false, false, "", false, false},
-		{"read error sidecar", true, "", true, false, "From sidecar", false, true},
-		{"read error rename", true, "", false, true, "Renamed in chat", false, true},
-		{"read error both files", true, "", true, true, "From sidecar", false, true},
-		{"read error no title", true, "", false, false, "", false, true},
+		{name: "database beats both files", database: true, row: "From database", sidecar: true, rename: true, wantName: "From database", wantPresent: true},
+		{name: "missing database sidecar", sidecar: true, wantName: "From sidecar", wantPresent: true},
+		{name: "missing database rename", rename: true, wantName: "Renamed in chat", wantPresent: true},
+		{name: "missing database both files", sidecar: true, rename: true, wantName: "From sidecar", wantPresent: true},
+		{name: "missing database no title"},
+		{name: "missing table sidecar", schema: "CREATE TABLE settings (value TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
+		{name: "missing session_id sidecar", schema: "CREATE TABLE chat_sessions (title TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
+		{name: "missing title sidecar", schema: "CREATE TABLE chat_sessions (session_id TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
+		{name: "no row sidecar", database: true, sidecar: true, wantName: "From sidecar", wantPresent: true},
+		{name: "no row rename", database: true, rename: true, wantName: "Renamed in chat", wantPresent: true},
+		{name: "no row both files", database: true, sidecar: true, rename: true, wantName: "From sidecar", wantPresent: true},
+		{name: "no row no title", database: true},
+		{name: "blank row sidecar", database: true, row: "   ", sidecar: true, wantName: "From sidecar"},
+		{name: "blank row rename", database: true, row: "   ", rename: true, wantName: "Renamed in chat"},
+		{name: "blank row both files", database: true, row: "   ", sidecar: true, rename: true, wantName: "From sidecar"},
+		{name: "blank row no title", database: true, row: "   "},
+		{name: "read error sidecar", database: true, sidecar: true, wantName: "From sidecar", corrupt: true},
+		{name: "read error rename", database: true, rename: true, wantName: "Renamed in chat", corrupt: true},
+		{name: "read error both files", database: true, sidecar: true, rename: true, wantName: "From sidecar", corrupt: true},
+		{name: "read error no title", database: true, corrupt: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, store := testjsonl.QoderTitleRoot(t)
+			if tc.schema != "" {
+				require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
+				conn, err := sql.Open("sqlite3", store)
+				require.NoError(t, err)
+				_, err = conn.ExecContext(t.Context(), tc.schema)
+				require.NoError(t, err)
+				require.NoError(t, conn.Close())
+			}
 			if tc.database {
 				testjsonl.SetQoderTitle(t, store, "other", "Other session")
 			}

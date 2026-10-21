@@ -264,21 +264,41 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 }
 
 func TestQoderMissingRowFollowsSidecarUpdates(t *testing.T) {
-	root, store := testjsonl.QoderTitleRoot(t)
-	testjsonl.SetQoderTitle(t, store, "other-session", "Other title")
-	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
-	sidecar := strings.TrimSuffix(transcript, ".jsonl") + "-session.json"
-	archive := dbtest.OpenTestDB(t)
-	engine := newQoderTitleEngine(t, archive, root)
-	for _, tc := range []struct {
-		title, want string
+	for _, storeCase := range []struct {
+		name, schema string
 	}{
-		{"First", "First"},
-		{"Later", "Later"},
-		{"", "Later"},
+		{name: "missing row", schema: testjsonl.QoderTitleSchema},
+		{name: "missing table", schema: "CREATE TABLE settings (value TEXT)"},
+		{name: "missing session_id", schema: "CREATE TABLE chat_sessions (title TEXT)"},
+		{name: "missing title", schema: "CREATE TABLE chat_sessions (session_id TEXT)"},
 	} {
-		require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"`+tc.title+`"}`), 0o644))
-		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))
-		assert.Equal(t, new(tc.want), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+		t.Run(storeCase.name, func(t *testing.T) {
+			root, store := testjsonl.QoderTitleRoot(t)
+			require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
+			conn, err := sql.Open("sqlite3", store)
+			require.NoError(t, err)
+			_, err = conn.ExecContext(t.Context(), storeCase.schema)
+			require.NoError(t, err)
+			require.NoError(t, conn.Close())
+			transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+			sidecar := strings.TrimSuffix(transcript, ".jsonl") + "-session.json"
+			archive := dbtest.OpenTestDB(t)
+			engine := newQoderTitleEngine(t, archive, root)
+			for _, tc := range []struct {
+				title, want string
+			}{
+				{title: "First", want: "First"},
+				{title: "Later", want: "Later"},
+				{title: "", want: "Later"},
+			} {
+				require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"`+tc.title+`"}`), 0o644))
+				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))
+				assert.Zero(t, engine.LastSyncStats().Failed)
+				assert.Equal(t, new(tc.want), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+			}
+			stats := engine.SyncAll(t.Context(), nil)
+			assert.Zero(t, stats.Failed)
+			assert.Equal(t, new("Later"), qoderStoredTitle(t, archive, testjsonl.QoderTitleID))
+		})
 	}
 }

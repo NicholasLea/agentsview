@@ -4162,8 +4162,7 @@ schemas keep their existing ordering behavior.
   read error suppresses every file-side title signal, including an in-chat
   rename without a sidecar. Inserts still seed from the parsed name; updates
   keep the archived name. Antigravity instead clears the name for a blank title.
-  Rechecked against the parser and synthetic stores on 2026-10-21. The database
-  lookup covers macOS only. `~/.qoderwork/projects` and the three
+  The database lookup covers macOS only. `~/.qoderwork/projects` and the three
   `SharedClientCache/cli/projects` roots keep file-side names because no title
   store is confirmed for them.
 - **Usage and cost:** The consumed files provide transcript and model/session
