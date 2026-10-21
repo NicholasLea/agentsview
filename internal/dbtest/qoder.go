@@ -1,12 +1,8 @@
 package dbtest
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-	"go.kenn.io/agentsview/internal/parser"
 	"go.kenn.io/agentsview/internal/testjsonl"
 )
 
@@ -18,14 +14,7 @@ const QoderTitleID = testjsonl.QoderTitleID
 // any other root, including a mirror extraction, resolves to no database.
 func QoderTitleRoot(t *testing.T) (root, store string) {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	root = filepath.Join(home, ".qoder", "projects")
-	require.NoError(t, os.MkdirAll(root, 0o755))
-	store, ok := parser.QoderTitleDatabase(root)
-	require.True(t, ok)
-	return root, store
+	return testjsonl.QoderTitleRoot(t)
 }
 
 func WriteQoderTitleTranscript(t *testing.T, root, content string) string {

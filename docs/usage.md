@@ -427,8 +427,9 @@ or on the next `agentsview sync`. Names set in AgentsView still win.
 
 Qoder sessions on macOS show the title the IDE saves in its application
 database, `main.sqlite` under the app's user-data directory, and follow renames
-there the same way. A title the app leaves blank never erases a name Qoder
-already gave a session.
+there the same way. Blank titles or database read errors preserve the archived
+name; sessions with no database row follow file-side names.
+If Qoder creates its database after AgentsView starts, renames appear after the next sync.
 
 When a session has a native resume target, the sidebar also exposes a direct
 native session link so supported agents can reopen their own session instead of

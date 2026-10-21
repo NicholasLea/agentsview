@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // QoderTitleDBName is the database where the Qoder IDE stores session titles.
@@ -116,20 +115,11 @@ func qoderTitleWatchRoots(roots []string) []WatchRoot {
 	return out
 }
 
-// qoderSessionTitleID returns the chat_sessions key for a transcript path, or
-// "" when the file is not a session's own transcript. Subagent files are
-// excluded by the caller's subagent gate, not by a second copy of it here.
-func qoderSessionTitleID(path string) string {
-	stem, ok := strings.CutSuffix(filepath.Base(path), ".jsonl")
-	if !ok || !IsValidQoderSessionID(stem) {
-		return ""
-	}
-	return stem
-}
-
-// applyQoderTitles prefers the app database title, then the file-side name
-// already selected by the parser. Only the transcript's own session is titled.
-func applyQoderTitles(ctx context.Context, results []ParseResult, path string, sidecarTitle bool) {
+// applyQoderTitles uses a non-blank app database title for the file's own
+// session. A successful read with no row preserves the parser's title signal.
+// A blank row or read error suppresses that signal, so file-side names seed
+// inserts while updates preserve the archived name.
+func applyQoderTitles(ctx context.Context, results []ParseResult, path, fileStem string) {
 	root, ok := QoderSessionRoot(path)
 	if !ok {
 		return
@@ -138,16 +128,15 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path string, s
 	if !ok || !IsRegularFile(store) {
 		return
 	}
-	id := qoderSessionTitleID(path)
-	if id == "" {
-		return
-	}
 	titles, _, err := QoderStoreTitles(ctx, store)
 	title, row := "", false
 	if err == nil {
-		title, row = titles[id]
+		title, row = titles[fileStem]
 	}
-	target := qoderPrefixID(id)
+	if err == nil && !row {
+		return
+	}
+	target := qoderPrefixID(fileStem)
 	for i := range results {
 		if results[i].Session.ID != target {
 			continue
@@ -157,10 +146,6 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path string, s
 			results[i].Session.SessionNamePresent = true
 			continue
 		}
-		// The parsed name seeds a first import. Only a transcript rename
-		// without a sidecar supplies a title signal for updates.
-		if !results[i].Session.claudeRenameSeen || sidecarTitle {
-			results[i].Session.SessionNamePresent = false
-		}
+		results[i].Session.SessionNamePresent = false
 	}
 }

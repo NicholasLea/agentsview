@@ -16,6 +16,19 @@ const QoderTitleID = "11111111-1111-4111-8111-111111111111"
 // QoderProjectDir is the encoded project directory a Qoder transcript lives in.
 const QoderProjectDir = "-Users-alice-sample-project"
 
+// QoderTitleRoot isolates the home directory and returns the international
+// session root and its application database path.
+func QoderTitleRoot(t *testing.T) (root, store string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	root = filepath.Join(home, ".qoder", "projects")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	store = filepath.Join(home, "Library", "Application Support", "com.qoder.app.stable", "main.sqlite")
+	return root, store
+}
+
 // QoderTitleSchema is the smallest chat_sessions shape the title reader needs.
 // The real table has more columns, and the two Qoder builds' column sets are
 // not identical, so the reader must select only what it uses.

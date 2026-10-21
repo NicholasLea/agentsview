@@ -13,20 +13,6 @@ import (
 	"go.kenn.io/agentsview/internal/testjsonl"
 )
 
-// qoderTitleHome points HOME at a fresh directory and returns the
-// international session root together with the application database it binds.
-func qoderTitleHome(t *testing.T) (root, store string) {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	root = filepath.Join(home, ".qoder", "projects")
-	require.NoError(t, os.MkdirAll(root, 0o755))
-	store, ok := QoderTitleDatabase(root)
-	require.True(t, ok)
-	return root, store
-}
-
 func readTitles(t *testing.T, store string) map[string]string {
 	t.Helper()
 	titles, _, err := QoderStoreTitles(t.Context(), store)
@@ -51,7 +37,7 @@ func closeWALStore(t *testing.T, store string) {
 }
 
 func TestQoderStoreTitles(t *testing.T) {
-	_, store := qoderTitleHome(t)
+	_, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, "plain-id", "  Renamed  ")
 	testjsonl.SetQoderTitle(t, store, "blank-id", "   ")
 	testjsonl.SetQoderTitle(t, store, "empty-id", "")
@@ -69,7 +55,7 @@ func TestQoderStoreTitles(t *testing.T) {
 
 // A closed Qoder database can retain WAL mode without sibling files.
 func TestQoderStoreTitlesWithoutWALSiblings(t *testing.T) {
-	_, store := qoderTitleHome(t)
+	_, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, "id", "First")
 	closeWALStore(t, store)
 	assert.Equal(t, "First", readTitles(t, store)["id"])
@@ -77,7 +63,7 @@ func TestQoderStoreTitlesWithoutWALSiblings(t *testing.T) {
 
 func TestQoderStoreTitlesErrors(t *testing.T) {
 	t.Run("missing table", func(t *testing.T) {
-		_, store := qoderTitleHome(t)
+		_, store := testjsonl.QoderTitleRoot(t)
 		require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
 		conn, err := sql.Open("sqlite3", store)
 		require.NoError(t, err)
@@ -88,7 +74,7 @@ func TestQoderStoreTitlesErrors(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("missing column", func(t *testing.T) {
-		_, store := qoderTitleHome(t)
+		_, store := testjsonl.QoderTitleRoot(t)
 		require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
 		conn, err := sql.Open("sqlite3", store)
 		require.NoError(t, err)
@@ -100,14 +86,14 @@ func TestQoderStoreTitlesErrors(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("not a database", func(t *testing.T) {
-		_, store := qoderTitleHome(t)
+		_, store := testjsonl.QoderTitleRoot(t)
 		require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
 		require.NoError(t, os.WriteFile(store, []byte("not sqlite"), 0o600))
 		_, _, err := QoderStoreTitles(t.Context(), store)
 		assert.Error(t, err)
 	})
 	t.Run("absent store is empty", func(t *testing.T) {
-		_, store := qoderTitleHome(t)
+		_, store := testjsonl.QoderTitleRoot(t)
 		titles, _, err := QoderStoreTitles(t.Context(), store)
 		require.NoError(t, err)
 		assert.Empty(t, titles)
@@ -193,28 +179,36 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		rename      bool
 		wantName    string
 		wantPresent bool
+		corrupt     bool
 	}{
-		{"database beats both files", true, "From database", true, true, "From database", true},
-		{"missing database sidecar", false, "", true, false, "From sidecar", true},
-		{"missing database rename", false, "", false, true, "Renamed in chat", true},
-		{"missing database both files", false, "", true, true, "From sidecar", true},
-		{"missing database no title", false, "", false, false, "", true},
-		{"no row sidecar", true, "", true, false, "From sidecar", false},
-		{"no row rename", true, "", false, true, "Renamed in chat", true},
-		{"no row both files", true, "", true, true, "From sidecar", false},
-		{"no row no title", true, "", false, false, "", false},
-		{"blank row sidecar", true, "   ", true, false, "From sidecar", false},
-		{"blank row rename", true, "   ", false, true, "Renamed in chat", true},
-		{"blank row both files", true, "   ", true, true, "From sidecar", false},
-		{"blank row no title", true, "   ", false, false, "", false},
+		{"database beats both files", true, "From database", true, true, "From database", true, false},
+		{"missing database sidecar", false, "", true, false, "From sidecar", true, false},
+		{"missing database rename", false, "", false, true, "Renamed in chat", true, false},
+		{"missing database both files", false, "", true, true, "From sidecar", true, false},
+		{"missing database no title", false, "", false, false, "", true, false},
+		{"no row sidecar", true, "", true, false, "From sidecar", true, false},
+		{"no row rename", true, "", false, true, "Renamed in chat", true, false},
+		{"no row both files", true, "", true, true, "From sidecar", true, false},
+		{"no row no title", true, "", false, false, "", true, false},
+		{"blank row sidecar", true, "   ", true, false, "From sidecar", false, false},
+		{"blank row rename", true, "   ", false, true, "Renamed in chat", false, false},
+		{"blank row both files", true, "   ", true, true, "From sidecar", false, false},
+		{"blank row no title", true, "   ", false, false, "", false, false},
+		{"read error sidecar", true, "", true, false, "From sidecar", false, true},
+		{"read error rename", true, "", false, true, "Renamed in chat", false, true},
+		{"read error both files", true, "", true, true, "From sidecar", false, true},
+		{"read error no title", true, "", false, false, "", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root, store := qoderTitleHome(t)
+			root, store := testjsonl.QoderTitleRoot(t)
 			if tc.database {
 				testjsonl.SetQoderTitle(t, store, "other", "Other session")
 			}
 			if tc.row != "" {
 				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, tc.row)
+			}
+			if tc.corrupt {
+				require.NoError(t, os.WriteFile(store, []byte("not sqlite"), 0o600))
 			}
 			path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
 			if tc.rename {
@@ -234,7 +228,7 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 
 func TestQoderParseSurvivesCorruptSidecar(t *testing.T) {
 	t.Run("database still titles it", func(t *testing.T) {
-		root, store := qoderTitleHome(t)
+		root, store := testjsonl.QoderTitleRoot(t)
 		testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "From database")
 		path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
 		require.NoError(t, os.WriteFile(
@@ -247,7 +241,7 @@ func TestQoderParseSurvivesCorruptSidecar(t *testing.T) {
 		assert.True(t, results[0].Session.SessionNamePresent)
 	})
 	t.Run("no other signal leaves it blank", func(t *testing.T) {
-		root, store := qoderTitleHome(t)
+		root, store := testjsonl.QoderTitleRoot(t)
 		testjsonl.SetQoderTitle(t, store, "some-other-session", "Unrelated")
 		path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
 		require.NoError(t, os.WriteFile(
@@ -257,12 +251,12 @@ func TestQoderParseSurvivesCorruptSidecar(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, results, 1)
 		assert.Empty(t, results[0].Session.SessionName)
-		assert.False(t, results[0].Session.SessionNamePresent)
+		assert.True(t, results[0].Session.SessionNamePresent)
 	})
 }
 
 func TestQoderSubagentTranscriptIsNotTitled(t *testing.T) {
-	root, store := qoderTitleHome(t)
+	root, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, "agent-123", "Subagent name")
 	path := filepath.Join(
 		root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID, "subagents", "agent-123.jsonl",
@@ -285,7 +279,7 @@ func TestQoderSubagentTranscriptIsNotTitled(t *testing.T) {
 }
 
 func TestQoderInChatRenameIsATitleSignal(t *testing.T) {
-	root, store := qoderTitleHome(t)
+	root, store := testjsonl.QoderTitleRoot(t)
 	path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help me")
 	require.NoError(t, os.WriteFile(path, append(mustRead(t, path), []byte(testjsonl.QoderCustomTitleJSON(testjsonl.QoderTitleID, "Renamed in chat")+"\n")...), 0o644))
 	results, err := ParseQoderSession(path, "sample-project", "local")
@@ -304,7 +298,7 @@ func TestQoderInChatRenameIsATitleSignal(t *testing.T) {
 }
 
 func TestQoderProviderParseTitlesLocalSourceWithoutRootMetadata(t *testing.T) {
-	root, store := qoderTitleHome(t)
+	root, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed")
 	testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
 	provider, ok := NewProvider(AgentQoder, ProviderConfig{Roots: []string{root}})
@@ -323,7 +317,7 @@ func TestQoderProviderParseTitlesLocalSourceWithoutRootMetadata(t *testing.T) {
 }
 
 func TestQoderParseMaterializedRemoteSource(t *testing.T) {
-	root, store := qoderTitleHome(t)
+	root, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Local title")
 	path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
 	// A remote import unpacks to a fresh directory whose trailing segments still
@@ -350,7 +344,7 @@ func TestQoderParseMaterializedRemoteSource(t *testing.T) {
 // several sessions: the store row is keyed by the file stem, so only that
 // session is titled and a fork keeps its own identity.
 func TestQoderTitleTargetsOnlyTheFilesOwnSession(t *testing.T) {
-	root, store := qoderTitleHome(t)
+	root, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Own title")
 	results := []ParseResult{
 		{Session: ParsedSession{Agent: AgentQoder, ID: qoderPrefixID(testjsonl.QoderTitleID)}},
@@ -362,7 +356,7 @@ func TestQoderTitleTargetsOnlyTheFilesOwnSession(t *testing.T) {
 	}
 	applyQoderTitles(t.Context(), results, filepath.Join(
 		root, testjsonl.QoderProjectDir, testjsonl.QoderTitleID+".jsonl",
-	), false)
+	), testjsonl.QoderTitleID)
 	assert.Equal(t, "Own title", results[0].Session.SessionName)
 	assert.True(t, results[0].Session.SessionNamePresent)
 	assert.Empty(t, results[1].Session.SessionName)
@@ -370,7 +364,7 @@ func TestQoderTitleTargetsOnlyTheFilesOwnSession(t *testing.T) {
 }
 
 func TestQoderWatchPlanIncludesTitleStoreDirectory(t *testing.T) {
-	root, store := qoderTitleHome(t)
+	root, store := testjsonl.QoderTitleRoot(t)
 	provider, ok := NewProvider(AgentQoder, ProviderConfig{Roots: []string{root}})
 	require.True(t, ok)
 	dir := filepath.Dir(store)
@@ -397,7 +391,7 @@ func TestQoderWatchPlanIncludesTitleStoreDirectory(t *testing.T) {
 }
 
 func TestQoderStoreTitlesCacheReuseAndRefresh(t *testing.T) {
-	_, store := qoderTitleHome(t)
+	_, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, "id", "First")
 	cached := readTitles(t, store)
 	require.Equal(t, "First", cached["id"])
@@ -415,7 +409,7 @@ func TestQoderTitleSharesCacheWithAntigravity(t *testing.T) {
 	// Both agents read through one path-keyed cache. The same session ID in a
 	// Qoder store must not leak into an Antigravity store, so each path keeps
 	// its own value for the same ID.
-	_, qoderStore := qoderTitleHome(t)
+	_, qoderStore := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, qoderStore, "shared-id", "")
 	antigravityStore := filepath.Join(t.TempDir(), AntigravitySummariesDBName)
 	conn, err := sql.Open("sqlite3", antigravityStore)

@@ -306,9 +306,15 @@ func TestQoderUsageOnlyArchiveSkipsTitleStore(t *testing.T) {
 		"a usage-only pass is a no-op and never reads the store")
 }
 
-func TestQoderUnavailableTitleKeepsStoredName(t *testing.T) {
-	for _, state := range []string{"blank row", "removed row", "unreadable file"} {
-		t.Run(state, func(t *testing.T) {
+func TestQoderTitleFallbackOnReparse(t *testing.T) {
+	for _, tc := range []struct {
+		state, wantName string
+	}{
+		{"blank row", "Name in the app"},
+		{"removed row", "Updated export"},
+		{"unreadable file", "Name in the app"},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
 			root, store := dbtest.QoderTitleRoot(t)
 			transcript := dbtest.WriteQoderTitleTranscript(t, root, "hello")
 			require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Name from export"}`), 0o644))
@@ -319,7 +325,7 @@ func TestQoderUnavailableTitleKeepsStoredName(t *testing.T) {
 			require.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
 			original, err := os.ReadFile(store)
 			require.NoError(t, err)
-			switch state {
+			switch tc.state {
 			case "blank row":
 				dbtest.SetQoderTitle(t, store, "   ")
 			case "removed row":
@@ -334,11 +340,12 @@ func TestQoderUnavailableTitleKeepsStoredName(t *testing.T) {
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
 			assert.Equal(t, new("Name in the app"), qoderStoredTitle(t, archive, dbtest.QoderTitleID))
 			transcript = dbtest.WriteQoderTitleTranscript(t, root, "changed transcript")
+			require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Updated export"}`), 0o644))
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 			session, err := archive.GetSessionFull(t.Context(), "qoder:"+dbtest.QoderTitleID)
 			require.NoError(t, err)
 			assert.Equal(t, new("changed transcript"), session.FirstMessage)
-			assert.Equal(t, new("Name in the app"), session.SessionName)
+			assert.Equal(t, new(tc.wantName), session.SessionName)
 			require.NoError(t, os.WriteFile(store, original, 0o600))
 			dbtest.SetQoderTitle(t, store, "Recovered rename")
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))

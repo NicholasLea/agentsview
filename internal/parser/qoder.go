@@ -211,7 +211,7 @@ func ParseQoderSessionWithExclusions(
 	if !isSubagent {
 		// After the sidecar pass, so a rename in the application database
 		// outranks the title captured when the sidecar was exported.
-		applyQoderTitles(ctx, results, path, meta.Title != "")
+		applyQoderTitles(ctx, results, path, fileStem)
 	}
 	for i := range excluded {
 		excluded[i] = qoderExcludedID(
