@@ -16,16 +16,18 @@ import (
 	"go.kenn.io/agentsview/internal/testjsonl"
 )
 
-func newAntigravityTitleEngine(t *testing.T, archive *db.DB, roots ...string) *sync.Engine {
+func newNativeTitleEngine(t *testing.T, archive *db.DB, agent parser.AgentType, roots ...string) *sync.Engine {
 	t.Helper()
-	return sync.NewEngine(t.Context(), archive, sync.EngineConfig{
-		AgentDirs: map[parser.AgentType][]string{parser.AgentAntigravity: roots}, Machine: "host-a",
+	engine := sync.NewEngine(t.Context(), archive, sync.EngineConfig{
+		AgentDirs: map[parser.AgentType][]string{agent: roots}, Machine: "host-a",
 	})
+	t.Cleanup(engine.Close)
+	return engine
 }
 
-func antigravityStoredTitle(t *testing.T, archive *db.DB) *string {
+func nativeStoredTitle(t *testing.T, archive *db.DB, id string) *string {
 	t.Helper()
-	session, err := archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
+	session, err := archive.GetSessionFull(t.Context(), id)
 	require.NoError(t, err)
 	require.NotNil(t, session)
 	return session.SessionName
@@ -56,8 +58,7 @@ func TestAntigravityPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
 	})
 	t.Cleanup(remote.Close)
 	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{remoteTranscript}))
-	local := newAntigravityTitleEngine(t, archive, root)
-	t.Cleanup(local.Close)
+	local := newNativeTitleEngine(t, archive, parser.AgentAntigravity, root)
 	require.NoError(t, local.SyncPathsContext(t.Context(), []string{localTranscript}))
 	prefixed := "host-b~antigravity:" + dbtest.AntigravityTitleID
 	localID := "antigravity:" + otherID
@@ -96,10 +97,10 @@ func TestAntigravityTitlesFollowStore(t *testing.T) {
 			}
 			store := dbtest.SetAntigravityTitle(t, root, "First")
 			archive := dbtest.OpenTestDB(t)
-			engine := newAntigravityTitleEngine(t, archive, root)
+			engine := newNativeTitleEngine(t, archive, parser.AgentAntigravity, root)
 
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-			require.Equal(t, new("First"), antigravityStoredTitle(t, archive), "a new session takes its saved title")
+			require.Equal(t, new("First"), nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID), "a new session takes its saved title")
 			before, err := archive.GetSessionFull(t.Context(), "antigravity:"+dbtest.AntigravityTitleID)
 			require.NoError(t, err)
 			assert.Equal(t, new(transcript), before.FilePath)
@@ -114,7 +115,7 @@ func TestAntigravityTitlesFollowStore(t *testing.T) {
 
 			dbtest.SetAntigravityTitle(t, root, "  ")
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-			assert.Nil(t, antigravityStoredTitle(t, archive), "a blank saved title clears the name")
+			assert.Nil(t, nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID), "a blank saved title clears the name")
 			for _, tc := range []struct {
 				title   string
 				want    *string
@@ -131,11 +132,11 @@ func TestAntigravityTitlesFollowStore(t *testing.T) {
 				result, err := engine.SyncChangedPathPlanContext(t.Context(), plan, nil)
 				require.NoError(t, err)
 				assert.Equal(t, tc.updates, result.Stats.TitlesUpdated)
-				assert.Equal(t, tc.want, antigravityStoredTitle(t, archive))
+				assert.Equal(t, tc.want, nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID))
 			}
 			dbtest.SetAntigravityTitle(t, root, "Direct refresh")
 			require.NoError(t, engine.SyncSingleSessionContext(t.Context(), "antigravity:"+dbtest.AntigravityTitleID))
-			assert.Equal(t, new("Direct refresh"), antigravityStoredTitle(t, archive))
+			assert.Equal(t, new("Direct refresh"), nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID))
 		})
 	}
 }
@@ -145,14 +146,14 @@ func TestAntigravityTitlesReachSessionsWithoutTranscript(t *testing.T) {
 	transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
 	store := dbtest.SetAntigravityTitle(t, root, "First")
 	archive := dbtest.OpenTestDB(t)
-	engine := newAntigravityTitleEngine(t, archive, root)
+	engine := newNativeTitleEngine(t, archive, parser.AgentAntigravity, root)
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 
 	require.NoError(t, os.RemoveAll(filepath.Join(root, "brain")))
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 	dbtest.SetAntigravityTitle(t, root, "Renamed")
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-	assert.Equal(t, new("Renamed"), antigravityStoredTitle(t, archive))
+	assert.Equal(t, new("Renamed"), nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID))
 }
 
 func TestAntigravityUnreadableTitleStoreKeepsTitle(t *testing.T) {
@@ -166,7 +167,7 @@ func TestAntigravityUnreadableTitleStoreKeepsTitle(t *testing.T) {
 			transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
 			store := dbtest.SetAntigravityTitle(t, root, "First")
 			archive := dbtest.OpenTestDB(t)
-			engine := newAntigravityTitleEngine(t, archive, root)
+			engine := newNativeTitleEngine(t, archive, parser.AgentAntigravity, root)
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 
 			data := []byte("not a database")
@@ -189,7 +190,7 @@ func TestAntigravityUnreadableTitleStoreKeepsTitle(t *testing.T) {
 			} else {
 				assert.Equal(t, 1, stats.Failed)
 			}
-			assert.Equal(t, new("First"), antigravityStoredTitle(t, archive), "an unreadable store keeps the stored title")
+			assert.Equal(t, new("First"), nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID), "an unreadable store keeps the stored title")
 		})
 	}
 }
@@ -198,12 +199,12 @@ func TestAntigravityFullSyncBackfillsTitles(t *testing.T) {
 	root := t.TempDir()
 	transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
 	archive := dbtest.OpenTestDB(t)
-	require.NoError(t, newAntigravityTitleEngine(t, archive, root).SyncPathsContext(t.Context(), []string{transcript}))
-	require.Nil(t, antigravityStoredTitle(t, archive))
+	require.NoError(t, newNativeTitleEngine(t, archive, parser.AgentAntigravity, root).SyncPathsContext(t.Context(), []string{transcript}))
+	require.Nil(t, nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID))
 
 	dbtest.SetAntigravityTitle(t, root, "Saved while closed")
-	newAntigravityTitleEngine(t, archive, root).SyncAll(t.Context(), nil)
-	assert.Equal(t, new("Saved while closed"), antigravityStoredTitle(t, archive), "existing sessions pick up titles without a transcript change")
+	newNativeTitleEngine(t, archive, parser.AgentAntigravity, root).SyncAll(t.Context(), nil)
+	assert.Equal(t, new("Saved while closed"), nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID), "existing sessions pick up titles without a transcript change")
 }
 
 func TestAntigravityTitleStoreRenamesOnlyItsOwnSessions(t *testing.T) {
@@ -211,12 +212,12 @@ func TestAntigravityTitleStoreRenamesOnlyItsOwnSessions(t *testing.T) {
 	transcript := dbtest.WriteAntigravityTitleTranscript(t, owner, "hello")
 	dbtest.SetAntigravityTitle(t, owner, "Owner title")
 	archive := dbtest.OpenTestDB(t)
-	engine := newAntigravityTitleEngine(t, archive, owner, other)
+	engine := newNativeTitleEngine(t, archive, parser.AgentAntigravity, owner, other)
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 
 	store := dbtest.SetAntigravityTitle(t, other, "Other root title")
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
-	assert.Equal(t, new("Owner title"), antigravityStoredTitle(t, archive))
+	assert.Equal(t, new("Owner title"), nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID))
 }
 
 func TestAntigravityRebuildKeepsRenamesOfSessionsWithoutTranscript(t *testing.T) {
@@ -224,7 +225,7 @@ func TestAntigravityRebuildKeepsRenamesOfSessionsWithoutTranscript(t *testing.T)
 	transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
 	dbtest.SetAntigravityTitle(t, root, "First")
 	archive := dbtest.OpenTestDB(t)
-	engine := newAntigravityTitleEngine(t, archive, root)
+	engine := newNativeTitleEngine(t, archive, parser.AgentAntigravity, root)
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 
 	require.NoError(t, os.RemoveAll(filepath.Join(root, "brain")))
@@ -233,7 +234,7 @@ func TestAntigravityRebuildKeepsRenamesOfSessionsWithoutTranscript(t *testing.T)
 		[]byte(`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"live"}`+"\n"))
 	dbtest.SetAntigravityTitle(t, root, "Later")
 	engine.ResyncAll(t.Context(), nil)
-	assert.Equal(t, new("Later"), antigravityStoredTitle(t, archive), "orphan copies must not restore an older title")
+	assert.Equal(t, new("Later"), nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID), "orphan copies must not restore an older title")
 }
 
 func TestAntigravityTitleRenamesRespectCwdFilter(t *testing.T) {
@@ -250,7 +251,7 @@ func TestAntigravityTitleRenamesRespectCwdFilter(t *testing.T) {
 				transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
 				store := dbtest.SetAntigravityTitle(t, root, "First")
 				archive := dbtest.OpenTestDB(t)
-				require.NoError(t, newAntigravityTitleEngine(t, archive, root).SyncPathsContext(t.Context(), []string{transcript}))
+				require.NoError(t, newNativeTitleEngine(t, archive, parser.AgentAntigravity, root).SyncPathsContext(t.Context(), []string{transcript}))
 				require.NoError(t, archive.UpdateSessionCwd(t.Context(), "antigravity:"+dbtest.AntigravityTitleID, filepath.Join(workspace, tc.name)))
 				allowed := filepath.Join(workspace, "allowed")
 				engine := sync.NewEngine(t.Context(), archive, sync.EngineConfig{
@@ -272,7 +273,7 @@ func TestAntigravityTitleRenamesRespectCwdFilter(t *testing.T) {
 				} else {
 					require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
 				}
-				assert.Equal(t, new(tc.want), antigravityStoredTitle(t, archive))
+				assert.Equal(t, new(tc.want), nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID))
 			})
 		}
 	}
@@ -283,7 +284,7 @@ func TestAntigravityTrashedSessionRestoresWithCurrentTitle(t *testing.T) {
 	transcript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
 	store := dbtest.SetAntigravityTitle(t, root, "First")
 	archive := dbtest.OpenTestDB(t)
-	engine := newAntigravityTitleEngine(t, archive, root)
+	engine := newNativeTitleEngine(t, archive, parser.AgentAntigravity, root)
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 	id := "antigravity:" + dbtest.AntigravityTitleID
 
@@ -292,5 +293,5 @@ func TestAntigravityTrashedSessionRestoresWithCurrentTitle(t *testing.T) {
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{store}))
 	_, err := archive.RestoreSession(t.Context(), id)
 	require.NoError(t, err)
-	assert.Equal(t, new("Renamed in trash"), antigravityStoredTitle(t, archive))
+	assert.Equal(t, new("Renamed in trash"), nativeStoredTitle(t, archive, "antigravity:"+dbtest.AntigravityTitleID))
 }

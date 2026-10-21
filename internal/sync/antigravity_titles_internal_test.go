@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/dbtest"
 	"go.kenn.io/agentsview/internal/parser"
+	"go.kenn.io/agentsview/internal/testjsonl"
 )
 
 type antigravityTitleQuerySpy struct {
@@ -73,7 +74,30 @@ func TestAntigravityFramelessWALEventsDoNotRereadStore(t *testing.T) {
 	assert.Empty(t, spy.queries, "reader-created WAL events must not reread titles")
 }
 
-func TestAntigravityTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
+func TestNativeTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
+	t.Run("qoder store outside watched roots", func(t *testing.T) {
+		root, store := testjsonl.QoderTitleRoot(t)
+		transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+		testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "First")
+		archive := openTestDB(t)
+		engine := NewEngine(t.Context(), archive, EngineConfig{AgentDirs: map[parser.AgentType][]string{parser.AgentQoder: {root}}, Machine: "host-a"})
+		t.Cleanup(engine.Close)
+		require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+		require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o600))
+		stats, err := engine.SyncWatchBatchThenRun(t.Context(), WatchBatch{Paths: []string{filepath.Join(root, "unrelated")}}, nil, nil)
+		assert.Equal(t, 1, stats.Failed)
+		require.NoError(t, err, "an external Qoder store must not schedule a watch retry")
+		session, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
+		require.NoError(t, err)
+		assert.Equal(t, new("First"), session.SessionName)
+		require.NoError(t, os.Remove(store))
+		testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Recovered rename")
+		stats = engine.SyncAll(t.Context(), nil)
+		assert.Zero(t, stats.Failed)
+		session, err = archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
+		require.NoError(t, err)
+		assert.Equal(t, new("Recovered rename"), session.SessionName)
+	})
 	for _, mode := range []string{"watcher", "watcher-read", "plan", "recovery", "grouped"} {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

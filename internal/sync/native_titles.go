@@ -73,7 +73,8 @@ func (e *Engine) reconcileNativeTitlesLocked(ctx context.Context, stats *SyncSta
 			}
 			if err != nil {
 				stats.RecordFailed()
-				if retry, ok := ctx.Value(nativeTitleRetryContextKey{}).(*WatchBatch); ok {
+				// Qoder stores live outside watched roots; the next sync retries them.
+				if retry, ok := ctx.Value(nativeTitleRetryContextKey{}).(*WatchBatch); ok && source.agent != parser.AgentQoder {
 					retry.Paths = watchAppendUniqueString(retry.Paths, store)
 				}
 				parser.InvalidateSQLiteTitles(store)

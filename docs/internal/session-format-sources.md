@@ -4152,7 +4152,10 @@ schemas keep their existing ordering behavior.
   behavior for other Qoder releases or platforms. A root is bound to its
   database only by a canonical absolute home-anchored path. Root binding was
   reverified on 2026-10-21 against configuration's `ResolveProviderRoot` path:
-  default-root symlinks resolve before title lookup. A custom root, or a remote
+  default-root symlinks resolve before title lookup. Transcript membership is
+  lexical under either the unresolved or resolved default root. Parser and sync
+  cases verify that symlinked files and project directories retain app titles
+  on import and database-only renames. A custom root, or a remote
   mirror unpacked under a temp directory whose trailing segments also read
   `.qoder/projects`, keeps its own file-side names. Names rank: an AgentsView
   display name, a non-blank app database title, then the file-side name selected
@@ -4160,7 +4163,9 @@ schemas keep their existing ordering behavior.
   appear at the next sync pass: a watched change in any agent root, manual
   sync, or startup. Without a database file, or after a
   successful read with no row for the session, non-empty file-side names update
-  normally; an empty parsed name preserves the archived title. A blank row or
+  normally; an empty parsed name preserves the archived title. Read errors retry
+  on the next sync pass without adding a watch retry, since the store lies
+  outside watched roots. A blank row or
   read error suppresses every file-side title signal, including an in-chat
   rename without a sidecar. Inserts still seed from the parsed name; updates
   keep the archived name. Antigravity instead clears the name for a blank title.

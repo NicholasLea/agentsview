@@ -31,19 +31,21 @@ func QoderStoreTitles(ctx context.Context, path string) (map[string]string, SQLi
 
 // QoderSessionRoot returns the canonical default root that owns a transcript
 // path, even after the file was deleted. A nested default root takes precedence.
+// Membership is lexical under either the unresolved or resolved default root.
 func QoderSessionRoot(path string) (string, bool) {
-	path, _, err := ResolveProviderRoot(AgentQoder, path)
-	if err != nil {
-		return "", false
-	}
+	root, _, ok := qoderSessionTitleStore(path)
+	return root, ok
+}
+
+func qoderSessionTitleStore(path string) (root, store string, ok bool) {
 	owner := ""
-	for root := range qoderTitleDatabases() {
-		rel, err := filepath.Rel(root, path)
-		if err == nil && rel != "." && filepath.IsLocal(rel) && len(root) > len(owner) {
-			owner = root
+	for alias, location := range qoderTitleDatabases() {
+		rel, err := filepath.Rel(alias, path)
+		if err == nil && rel != "." && filepath.IsLocal(rel) && len(alias) > len(owner) {
+			owner, root, store = alias, location.root, location.store
 		}
 	}
-	return owner, owner != ""
+	return root, store, owner != ""
 }
 
 // QoderTitleDatabase returns the application database holding titles for a
@@ -60,22 +62,30 @@ func QoderTitleDatabase(root string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	store, ok := qoderTitleDatabases()[root]
-	return store, ok
+	location, ok := qoderTitleDatabases()[root]
+	return location.store, ok
 }
 
-func qoderTitleDatabases() map[string]string {
+type qoderTitleStore struct {
+	root  string
+	store string
+}
+
+func qoderTitleDatabases() map[string]qoderTitleStore {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return nil
 	}
-	stores := make(map[string]string, len(qoderTitleLayouts))
+	stores := make(map[string]qoderTitleStore, 2*len(qoderTitleLayouts))
 	for _, layout := range qoderTitleLayouts {
-		root, _, err := ResolveProviderRoot(AgentQoder, filepath.Join(home, layout.dotDir, "projects"))
+		unresolved := filepath.Join(home, layout.dotDir, "projects")
+		root, _, err := ResolveProviderRoot(AgentQoder, unresolved)
 		if err != nil {
 			continue
 		}
-		stores[root] = filepath.Join(home, "Library", "Application Support", layout.appID, QoderTitleDBName)
+		location := qoderTitleStore{root: root, store: filepath.Join(home, "Library", "Application Support", layout.appID, QoderTitleDBName)}
+		stores[unresolved] = location
+		stores[root] = location
 	}
 	return stores
 }
@@ -85,11 +95,7 @@ func qoderTitleDatabases() map[string]string {
 // A blank row or read error suppresses that signal, so file-side names seed
 // inserts while updates preserve the archived name.
 func applyQoderTitles(ctx context.Context, results []ParseResult, path, fileStem string) {
-	root, ok := QoderSessionRoot(path)
-	if !ok {
-		return
-	}
-	store, ok := QoderTitleDatabase(root)
+	_, store, ok := qoderSessionTitleStore(path)
 	if !ok {
 		return
 	}
