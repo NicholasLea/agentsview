@@ -3,9 +3,13 @@ package parser
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // sqliteTitleSnapshot is one cached read of a native title database.
@@ -68,7 +72,14 @@ func sqliteStoreTitles(
 func readSQLiteTitles(
 	ctx context.Context, path, query string,
 ) (map[string]string, error) {
-	if !IsRegularFile(path) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
 		return nil, nil
 	}
 	observeSharedContainerScan(ctx)
@@ -92,7 +103,14 @@ func readSQLiteTitles(
 		if !title.Valid {
 			continue
 		}
-		titles[id] = strings.TrimSpace(title.String)
+		// Match db.SanitizeUTF8 before callers decide whether a title is present.
+		text := strings.ReplaceAll(strings.TrimSpace(title.String), "\x00", "")
+		titles[id] = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) && r != '\n' && r != '\t' && r != '\r' {
+				return -1
+			}
+			return r
+		}, strings.ToValidUTF8(text, ""))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

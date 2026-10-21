@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -129,6 +130,7 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		wantName    string
 		wantPresent bool
 		corrupt     bool
+		blocked     bool
 		schema      string
 	}{
 		{name: "database beats both files", database: true, row: "From database", sidecar: true, rename: true, wantName: "From database", wantPresent: true},
@@ -141,6 +143,10 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		{name: "no row no title", database: true},
 		{name: "blank row sidecar", database: true, row: "   ", sidecar: true, wantName: "From sidecar"},
 		{name: "blank row no title", database: true, row: "   "},
+		{name: "stripped row sidecar", database: true, row: "\x00\x1b\u0080\x7f", sidecar: true, wantName: "From sidecar"},
+		{name: "stripped row no title", database: true, row: "\x00\x1b\u0080\x7f"},
+		{name: "sanitized database title", database: true, row: "\x00Real\t日本語\nTitle\x1b\u0080", sidecar: true, wantName: "Real\t日本語\nTitle", wantPresent: true},
+		{name: "stat error sidecar", database: true, sidecar: true, blocked: true, wantName: "From sidecar"},
 		{name: "read error sidecar", database: true, sidecar: true, wantName: "From sidecar", corrupt: true},
 		{name: "read error no title", database: true, corrupt: true},
 	} {
@@ -162,6 +168,16 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 			}
 			if tc.corrupt {
 				require.NoError(t, os.WriteFile(store, []byte("not sqlite"), 0o600))
+			}
+			if tc.blocked {
+				if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+					t.Skip("requires Unix permissions enforced for a non-root user")
+				}
+				dir := filepath.Dir(store)
+				require.NoError(t, os.Chmod(dir, 0o000))
+				t.Cleanup(func() { require.NoError(t, os.Chmod(dir, 0o755)) })
+				_, err := os.Lstat(store)
+				require.ErrorIs(t, err, os.ErrPermission)
 			}
 			path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
 			if tc.rename {
