@@ -3281,6 +3281,29 @@ func (db *DB) MessageContentFingerprint(ctx context.Context, sessionID string) (
 	return sum, maximum, minimum, err
 }
 
+// SanitizeUTF8 strips NUL bytes, replaces invalid UTF-8 sequences,
+// and removes control runes (other than \n, \t, \r). PostgreSQL
+// enforces strict UTF-8 and rejects NUL in text columns, so the push
+// boundary applies this to every parser-derived string; the local
+// fingerprint builders below apply it too so local fingerprints stay
+// comparable to PG-readback fingerprints when a stored row carries
+// NUL bytes.
+//
+// The control-rune strip runs per rune, not per byte: C1 controls
+// (U+0080..U+009F) are valid two-byte UTF-8 and survive
+// strings.ToValidUTF8, so a terminal escape such as ESC ]0;...BEL
+// embedded in parsed content would otherwise persist intact. This
+// function is the single sanitization seam shared by the write path
+// (sync.validateAndSanitize), the local fingerprint builders, and the
+// PG push/readback path, so it MUST stay idempotent:
+// SanitizeUTF8(SanitizeUTF8(s)) == SanitizeUTF8(s). The byte-level
+// NUL strip is retained because it is the pg-push breaker fix and a
+// raw NUL must be removed before strings.ToValidUTF8 (which treats it
+// as valid).
+func SanitizeUTF8(s string) string {
+	return stringutil.SanitizeUTF8(s)
+}
+
 // MessageTokenFingerprint returns an exact ordered fingerprint of
 // stored token metadata for a session's messages. Used by PG push
 // fast-paths to detect token metadata changes without rewriting
@@ -3488,13 +3511,13 @@ func (db *DB) ToolCallParseDiffFingerprint(ctx context.Context, sessionID string
 		); err != nil {
 			return "", err
 		}
-		toolName = stringutil.SanitizeUTF8(toolName)
-		category = stringutil.SanitizeUTF8(category)
-		tu := stringutil.SanitizeUTF8(toolUseID.String)
-		skill := stringutil.SanitizeUTF8(skillName.String)
-		sub := stringutil.SanitizeUTF8(subagentSessionID.String)
-		fp := stringutil.SanitizeUTF8(filePath)
-		sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(inputJSON.String)))
+		toolName = SanitizeUTF8(toolName)
+		category = SanitizeUTF8(category)
+		tu := SanitizeUTF8(toolUseID.String)
+		skill := SanitizeUTF8(skillName.String)
+		sub := SanitizeUTF8(subagentSessionID.String)
+		fp := SanitizeUTF8(filePath)
+		sum := sha256.Sum256([]byte(SanitizeUTF8(inputJSON.String)))
 		fmt.Fprintf(&b,
 			"%d|%d:%s|%d:%s|%d:%s|%x|%d:%s|%d:%s|%d|%d:%s;",
 			ordinal,

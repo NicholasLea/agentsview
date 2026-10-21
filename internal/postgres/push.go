@@ -22,7 +22,6 @@ import (
 	"go.kenn.io/agentsview/internal/export"
 	"go.kenn.io/agentsview/internal/parser"
 	"go.kenn.io/agentsview/internal/storage"
-	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 const (
@@ -3741,7 +3740,7 @@ func pgMessageContentHashFingerprint(
 		); err != nil {
 			return "", err
 		}
-		sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(content)))
+		sum := sha256.Sum256([]byte(db.SanitizeUTF8(content)))
 		fmt.Fprintf(&b, "%d|%d|%x;", ordinal, contentLength, sum)
 	}
 	return b.String(), rows.Err()
@@ -3789,7 +3788,7 @@ func pgMessageRoleTimeFingerprint(
 		); err != nil {
 			return "", err
 		}
-		role = stringutil.SanitizeUTF8(role)
+		role = db.SanitizeUTF8(role)
 		timestampText := ""
 		if timestamp.Valid {
 			timestampText = FormatISO8601(timestamp.Time)
@@ -3829,7 +3828,7 @@ func pgMessageFlagsFingerprint(
 		); err != nil {
 			return "", err
 		}
-		sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(thinkingText)))
+		sum := sha256.Sum256([]byte(db.SanitizeUTF8(thinkingText)))
 		fmt.Fprintf(&b, "%d|%t|%t|%t|%x;",
 			ordinal, isSystem, hasThinking, hasToolUse, sum)
 	}
@@ -4368,7 +4367,7 @@ func (s *Sync) normalizeSyncTimestamps(
 // db.SanitizeUTF8 so the local fingerprint builders apply the
 // exact same normalization.
 func sanitizePG(s string) string {
-	return stringutil.SanitizeUTF8(s)
+	return db.SanitizeUTF8(s)
 }
 
 func nilIfEmpty(s string) any {

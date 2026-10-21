@@ -7,7 +7,6 @@ import (
 
 	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/parser"
-	"go.kenn.io/agentsview/internal/stringutil"
 	"go.kenn.io/agentsview/internal/timeutil"
 )
 
@@ -153,22 +152,22 @@ func ConvertPlanUsage(
 		row = db.SessionPlanUsage{
 			HasPlanUsage:    true,
 			DataAsOf:        planUsageTime(usage.DataAsOf),
-			DataStatus:      stringutil.SanitizeUTF8(usage.DataStatus),
-			UsageSource:     stringutil.SanitizeUTF8(usage.UsageSource),
+			DataStatus:      db.SanitizeUTF8(usage.DataStatus),
+			UsageSource:     db.SanitizeUTF8(usage.UsageSource),
 			WeeklyPercent:   usage.WeeklyPercent,
 			FiveHourPercent: usage.FiveHourPercent,
 			Credits:         sanitizedStringPtr(usage.Credits),
 			Final:           usage.Final,
-			OutcomeKind:     stringutil.SanitizeUTF8(usage.OutcomeKind),
+			OutcomeKind:     db.SanitizeUTF8(usage.OutcomeKind),
 			OutcomeAt:       planUsageTime(usage.OutcomeAt),
-			CountedUnder:    stringutil.SanitizeUTF8(usage.CountedUnder),
+			CountedUnder:    db.SanitizeUTF8(usage.CountedUnder),
 		}
 		for _, g := range usage.Groups {
 			row.Groups = append(row.Groups, db.SessionPlanUsageGroup{
-				Model:             stringutil.SanitizeUTF8(g.Model),
-				ReasoningEffort:   stringutil.SanitizeUTF8(g.ReasoningEffort),
-				Speed:             stringutil.SanitizeUTF8(g.Speed),
-				ProductExperience: stringutil.SanitizeUTF8(g.ProductExperience),
+				Model:             db.SanitizeUTF8(g.Model),
+				ReasoningEffort:   db.SanitizeUTF8(g.ReasoningEffort),
+				Speed:             db.SanitizeUTF8(g.Speed),
+				ProductExperience: db.SanitizeUTF8(g.ProductExperience),
 				WeeklyPercent:     g.WeeklyPercent,
 				FiveHourPercent:   g.FiveHourPercent,
 				Credits:           sanitizedStringPtr(g.Credits),
@@ -194,7 +193,7 @@ func sanitizedStringPtr(s *string) *string {
 	if s == nil {
 		return nil
 	}
-	return new(stringutil.SanitizeUTF8(*s))
+	return new(db.SanitizeUTF8(*s))
 }
 
 // ConvertToolCallsContext converts parsed tool calls into normalized rows.

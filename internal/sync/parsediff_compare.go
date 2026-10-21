@@ -358,8 +358,8 @@ func appendSessionMetadataDiffs(
 func appendScalarSessionDiff(
 	diffs []FieldDiff, field, agent, stored, parsed string,
 ) []FieldDiff {
-	sv := stringutil.SanitizeUTF8(stored)
-	pv := stringutil.SanitizeUTF8(parsed)
+	sv := db.SanitizeUTF8(stored)
+	pv := db.SanitizeUTF8(parsed)
 	if sv == pv {
 		return diffs
 	}
@@ -477,8 +477,8 @@ func renderNullableScalar(s string) string {
 func appendTextFieldDiff(
 	diffs []FieldDiff, field string, stored, parsed *string,
 ) []FieldDiff {
-	sv := stringutil.SanitizeUTF8(derefString(stored))
-	pv := stringutil.SanitizeUTF8(derefString(parsed))
+	sv := db.SanitizeUTF8(derefString(stored))
+	pv := db.SanitizeUTF8(derefString(parsed))
 	if sv == pv {
 		return diffs
 	}
@@ -524,17 +524,17 @@ func messageTokenFingerprintTwin(msgs []db.Message) string {
 
 	var b strings.Builder
 	for _, m := range ordered {
-		model := stringutil.SanitizeUTF8(m.Model)
-		reasoningEffort := stringutil.SanitizeUTF8(m.ReasoningEffort)
-		providerID := stringutil.SanitizeUTF8(m.ProviderID)
-		tokenUsage := stringutil.SanitizeUTF8(string(m.TokenUsage))
-		claudeMsgID := stringutil.SanitizeUTF8(m.ClaudeMessageID)
-		claudeReqID := stringutil.SanitizeUTF8(m.ClaudeRequestID)
-		srcType := stringutil.SanitizeUTF8(m.SourceType)
-		srcSubtype := stringutil.SanitizeUTF8(m.SourceSubtype)
-		promptSource := stringutil.SanitizeUTF8(m.PromptSource)
-		srcUUID := stringutil.SanitizeUTF8(m.SourceUUID)
-		srcParentUUID := stringutil.SanitizeUTF8(m.SourceParentUUID)
+		model := db.SanitizeUTF8(m.Model)
+		reasoningEffort := db.SanitizeUTF8(m.ReasoningEffort)
+		providerID := db.SanitizeUTF8(m.ProviderID)
+		tokenUsage := db.SanitizeUTF8(string(m.TokenUsage))
+		claudeMsgID := db.SanitizeUTF8(m.ClaudeMessageID)
+		claudeReqID := db.SanitizeUTF8(m.ClaudeRequestID)
+		srcType := db.SanitizeUTF8(m.SourceType)
+		srcSubtype := db.SanitizeUTF8(m.SourceSubtype)
+		promptSource := db.SanitizeUTF8(m.PromptSource)
+		srcUUID := db.SanitizeUTF8(m.SourceUUID)
+		srcParentUUID := db.SanitizeUTF8(m.SourceParentUUID)
 		fmt.Fprintf(&b,
 			"%d|%d:%s|%d:%s|%d:%s|%d:%s|%d|%d|%t|%t|%s|%s|"+
 				"%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%t|%t;",
@@ -572,7 +572,7 @@ func messageRoleTimeFingerprintTwin(msgs []db.Message) string {
 
 	var b strings.Builder
 	for _, m := range ordered {
-		role := stringutil.SanitizeUTF8(m.Role)
+		role := db.SanitizeUTF8(m.Role)
 		fmt.Fprintf(&b, "%d|%d:%s|%d:%s;",
 			m.Ordinal, len(role), role,
 			len(m.Timestamp), m.Timestamp,
@@ -596,7 +596,7 @@ func messageContentHashFingerprintTwin(msgs []db.Message) string {
 
 	var b strings.Builder
 	for _, m := range ordered {
-		sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(m.Content)))
+		sum := sha256.Sum256([]byte(db.SanitizeUTF8(m.Content)))
 		fmt.Fprintf(&b, "%d|%d|%x;", m.Ordinal, m.ContentLength, sum)
 	}
 	return b.String()
@@ -616,7 +616,7 @@ func messageFlagsFingerprintTwin(msgs []db.Message) string {
 
 	var b strings.Builder
 	for _, m := range ordered {
-		sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(m.ThinkingText)))
+		sum := sha256.Sum256([]byte(db.SanitizeUTF8(m.ThinkingText)))
 		fmt.Fprintf(&b, "%d|%t|%t|%t|%x;",
 			m.Ordinal, m.IsSystem, m.HasThinking, m.HasToolUse, sum)
 	}
@@ -640,13 +640,13 @@ func toolCallParseDiffFingerprintTwin(msgs []db.Message) string {
 	var b strings.Builder
 	for _, m := range ordered {
 		for _, tc := range m.ToolCalls {
-			toolName := stringutil.SanitizeUTF8(tc.ToolName)
-			category := stringutil.SanitizeUTF8(tc.Category)
-			tu := stringutil.SanitizeUTF8(tc.ToolUseID)
-			skill := stringutil.SanitizeUTF8(tc.SkillName)
-			sub := stringutil.SanitizeUTF8(tc.SubagentSessionID)
-			fp := stringutil.SanitizeUTF8(tc.FilePath)
-			sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(tc.InputJSON)))
+			toolName := db.SanitizeUTF8(tc.ToolName)
+			category := db.SanitizeUTF8(tc.Category)
+			tu := db.SanitizeUTF8(tc.ToolUseID)
+			skill := db.SanitizeUTF8(tc.SkillName)
+			sub := db.SanitizeUTF8(tc.SubagentSessionID)
+			fp := db.SanitizeUTF8(tc.FilePath)
+			sum := sha256.Sum256([]byte(db.SanitizeUTF8(tc.InputJSON)))
 			fmt.Fprintf(&b,
 				"%d|%d:%s|%d:%s|%d:%s|%x|%d:%s|%d:%s|%d|%d:%s;",
 				m.Ordinal,
@@ -706,8 +706,8 @@ func compareMessageMetadata(
 		firstToolWhat string
 	)
 	for _, p := range pairs {
-		sModel := stringutil.SanitizeUTF8(p.stored.Model)
-		pModel := stringutil.SanitizeUTF8(p.parsed.Model)
+		sModel := db.SanitizeUTF8(p.stored.Model)
+		pModel := db.SanitizeUTF8(p.parsed.Model)
 		if sModel != pModel {
 			if modelDiffs == 0 {
 				firstModelOrd = p.stored.Ordinal
@@ -844,7 +844,7 @@ func compareMessageMetadata(
 // fingerprint-mismatch diff.
 func messageContentDiffers(stored, parsed db.Message) bool {
 	return stored.ContentLength != parsed.ContentLength ||
-		stringutil.SanitizeUTF8(stored.Content) != stringutil.SanitizeUTF8(parsed.Content)
+		db.SanitizeUTF8(stored.Content) != db.SanitizeUTF8(parsed.Content)
 }
 
 // renderContentChange describes the first content change. Bodies are
@@ -870,10 +870,10 @@ func renderContentChange(stored, parsed db.Message) string {
 // "" when they match.
 func messageMetadataDiff(stored, parsed db.Message) string {
 	switch {
-	case stringutil.SanitizeUTF8(stored.Role) != stringutil.SanitizeUTF8(parsed.Role):
+	case db.SanitizeUTF8(stored.Role) != db.SanitizeUTF8(parsed.Role):
 		return fmt.Sprintf("role %q -> %q", stored.Role, parsed.Role)
-	case stringutil.SanitizeUTF8(stored.ReasoningEffort) !=
-		stringutil.SanitizeUTF8(parsed.ReasoningEffort):
+	case db.SanitizeUTF8(stored.ReasoningEffort) !=
+		db.SanitizeUTF8(parsed.ReasoningEffort):
 		return fmt.Sprintf(
 			"reasoning_effort %q -> %q", stored.ReasoningEffort, parsed.ReasoningEffort,
 		)
@@ -903,29 +903,29 @@ func messageMetadataDiff(stored, parsed db.Message) string {
 		return fmt.Sprintf(
 			"has_tool_use %t -> %t", stored.HasToolUse, parsed.HasToolUse,
 		)
-	case stringutil.SanitizeUTF8(stored.ThinkingText) !=
-		stringutil.SanitizeUTF8(parsed.ThinkingText):
+	case db.SanitizeUTF8(stored.ThinkingText) !=
+		db.SanitizeUTF8(parsed.ThinkingText):
 		return "thinking_text differs"
-	case stringutil.SanitizeUTF8(stored.SourceType) !=
-		stringutil.SanitizeUTF8(parsed.SourceType):
+	case db.SanitizeUTF8(stored.SourceType) !=
+		db.SanitizeUTF8(parsed.SourceType):
 		return "source_type differs"
-	case stringutil.SanitizeUTF8(stored.SourceSubtype) !=
-		stringutil.SanitizeUTF8(parsed.SourceSubtype):
+	case db.SanitizeUTF8(stored.SourceSubtype) !=
+		db.SanitizeUTF8(parsed.SourceSubtype):
 		return "source_subtype differs"
-	case stringutil.SanitizeUTF8(stored.PromptSource) !=
-		stringutil.SanitizeUTF8(parsed.PromptSource):
+	case db.SanitizeUTF8(stored.PromptSource) !=
+		db.SanitizeUTF8(parsed.PromptSource):
 		return "prompt_source differs"
-	case stringutil.SanitizeUTF8(stored.SourceUUID) !=
-		stringutil.SanitizeUTF8(parsed.SourceUUID):
+	case db.SanitizeUTF8(stored.SourceUUID) !=
+		db.SanitizeUTF8(parsed.SourceUUID):
 		return "source_uuid differs"
-	case stringutil.SanitizeUTF8(stored.SourceParentUUID) !=
-		stringutil.SanitizeUTF8(parsed.SourceParentUUID):
+	case db.SanitizeUTF8(stored.SourceParentUUID) !=
+		db.SanitizeUTF8(parsed.SourceParentUUID):
 		return "source_parent_uuid differs"
-	case stringutil.SanitizeUTF8(stored.ClaudeMessageID) !=
-		stringutil.SanitizeUTF8(parsed.ClaudeMessageID):
+	case db.SanitizeUTF8(stored.ClaudeMessageID) !=
+		db.SanitizeUTF8(parsed.ClaudeMessageID):
 		return "claude_message_id differs"
-	case stringutil.SanitizeUTF8(stored.ClaudeRequestID) !=
-		stringutil.SanitizeUTF8(parsed.ClaudeRequestID):
+	case db.SanitizeUTF8(stored.ClaudeRequestID) !=
+		db.SanitizeUTF8(parsed.ClaudeRequestID):
 		return "claude_request_id differs"
 	default:
 		return ""
@@ -962,37 +962,37 @@ func messageToolCallsDiff(stored, parsed db.Message) string {
 // length, the same sizes-not-bodies rule message content follows.
 func toolCallDiff(stored, parsed db.ToolCall) string {
 	switch {
-	case stringutil.SanitizeUTF8(stored.ToolName) !=
-		stringutil.SanitizeUTF8(parsed.ToolName):
+	case db.SanitizeUTF8(stored.ToolName) !=
+		db.SanitizeUTF8(parsed.ToolName):
 		return fmt.Sprintf(
 			"tool_name %q -> %q", stored.ToolName, parsed.ToolName,
 		)
-	case stringutil.SanitizeUTF8(stored.Category) !=
-		stringutil.SanitizeUTF8(parsed.Category):
+	case db.SanitizeUTF8(stored.Category) !=
+		db.SanitizeUTF8(parsed.Category):
 		return fmt.Sprintf(
 			"category %q -> %q", stored.Category, parsed.Category,
 		)
-	case stringutil.SanitizeUTF8(stored.ToolUseID) !=
-		stringutil.SanitizeUTF8(parsed.ToolUseID):
+	case db.SanitizeUTF8(stored.ToolUseID) !=
+		db.SanitizeUTF8(parsed.ToolUseID):
 		return "tool_use_id differs"
-	case stringutil.SanitizeUTF8(stored.InputJSON) !=
-		stringutil.SanitizeUTF8(parsed.InputJSON):
+	case db.SanitizeUTF8(stored.InputJSON) !=
+		db.SanitizeUTF8(parsed.InputJSON):
 		return "input_json differs"
-	case stringutil.SanitizeUTF8(stored.SkillName) !=
-		stringutil.SanitizeUTF8(parsed.SkillName):
+	case db.SanitizeUTF8(stored.SkillName) !=
+		db.SanitizeUTF8(parsed.SkillName):
 		return fmt.Sprintf(
 			"skill_name %q -> %q", stored.SkillName, parsed.SkillName,
 		)
-	case stringutil.SanitizeUTF8(stored.SubagentSessionID) !=
-		stringutil.SanitizeUTF8(parsed.SubagentSessionID):
+	case db.SanitizeUTF8(stored.SubagentSessionID) !=
+		db.SanitizeUTF8(parsed.SubagentSessionID):
 		return "subagent_session_id differs"
 	case stored.ResultContentLength != parsed.ResultContentLength:
 		return fmt.Sprintf(
 			"result_content_length %d -> %d",
 			stored.ResultContentLength, parsed.ResultContentLength,
 		)
-	case stringutil.SanitizeUTF8(stored.FilePath) !=
-		stringutil.SanitizeUTF8(parsed.FilePath):
+	case db.SanitizeUTF8(stored.FilePath) !=
+		db.SanitizeUTF8(parsed.FilePath):
 		return fmt.Sprintf(
 			"file_path %q -> %q", stored.FilePath, parsed.FilePath,
 		)
@@ -1045,8 +1045,8 @@ func alignByOrdinal(stored, parsed []db.Message) []ordinalPair {
 // coverage via Message.TokenPresence semantics (which preserve
 // legacy-row inference).
 func messageTokensDiffer(stored, parsed db.Message) bool {
-	if stringutil.SanitizeUTF8(string(stored.TokenUsage)) !=
-		stringutil.SanitizeUTF8(string(parsed.TokenUsage)) {
+	if db.SanitizeUTF8(string(stored.TokenUsage)) !=
+		db.SanitizeUTF8(string(parsed.TokenUsage)) {
 		return true
 	}
 	if stored.ContextTokens != parsed.ContextTokens ||
@@ -1083,7 +1083,7 @@ func renderModelSet(pairs []ordinalPair, storedSide bool) string {
 		if storedSide {
 			m = p.stored.Model
 		}
-		set[stringutil.SanitizeUTF8(m)] = true
+		set[db.SanitizeUTF8(m)] = true
 	}
 	models := make([]string, 0, len(set))
 	for m := range set {

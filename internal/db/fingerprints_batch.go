@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"strings"
-
-	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 // This file holds batched (session_id IN ...) twins of the per-session
@@ -624,17 +622,17 @@ type tokenFingerprintRow struct {
 // corrupt parse) would never match and the fast path would rewrite the
 // session on every push.
 func (r tokenFingerprintRow) appendTo(b *strings.Builder) {
-	model := stringutil.SanitizeUTF8(r.model)
-	reasoningEffort := stringutil.SanitizeUTF8(r.reasoningEffort)
-	providerID := stringutil.SanitizeUTF8(r.providerID)
-	tokenUsage := stringutil.SanitizeUTF8(r.tokenUsage)
-	claudeMsgID := stringutil.SanitizeUTF8(r.claudeMessageID)
-	claudeReqID := stringutil.SanitizeUTF8(r.claudeRequestID)
-	srcType := stringutil.SanitizeUTF8(r.sourceType)
-	srcSubtype := stringutil.SanitizeUTF8(r.sourceSubtype)
-	promptSource := stringutil.SanitizeUTF8(r.promptSource)
-	srcUUID := stringutil.SanitizeUTF8(r.sourceUUID)
-	srcParentUUID := stringutil.SanitizeUTF8(r.sourceParentUUID)
+	model := SanitizeUTF8(r.model)
+	reasoningEffort := SanitizeUTF8(r.reasoningEffort)
+	providerID := SanitizeUTF8(r.providerID)
+	tokenUsage := SanitizeUTF8(r.tokenUsage)
+	claudeMsgID := SanitizeUTF8(r.claudeMessageID)
+	claudeReqID := SanitizeUTF8(r.claudeRequestID)
+	srcType := SanitizeUTF8(r.sourceType)
+	srcSubtype := SanitizeUTF8(r.sourceSubtype)
+	promptSource := SanitizeUTF8(r.promptSource)
+	srcUUID := SanitizeUTF8(r.sourceUUID)
+	srcParentUUID := SanitizeUTF8(r.sourceParentUUID)
 	fmt.Fprintf(b,
 		"%d|%d:%s|%d:%s|%d:%s|%d:%s|%d|%d|%t|%t|%s|%s|"+
 			"%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%t|%t;",
@@ -658,7 +656,7 @@ func (r tokenFingerprintRow) appendTo(b *strings.Builder) {
 func appendContentHashFingerprintRow(
 	b *strings.Builder, ordinal, contentLength int, content string,
 ) {
-	sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(content)))
+	sum := sha256.Sum256([]byte(SanitizeUTF8(content)))
 	fmt.Fprintf(b, "%d|%d|%x;", ordinal, contentLength, sum)
 }
 
@@ -666,7 +664,7 @@ func appendRoleTimeFingerprintRow(
 	b *strings.Builder, ordinal int, role, timestamp string,
 	normalizeTimestamp func(string) string,
 ) {
-	role = stringutil.SanitizeUTF8(role)
+	role = SanitizeUTF8(role)
 	if normalizeTimestamp != nil {
 		timestamp = normalizeTimestamp(timestamp)
 	}
@@ -683,7 +681,7 @@ type flagsFingerprintRow struct {
 }
 
 func (r flagsFingerprintRow) appendTo(b *strings.Builder) {
-	sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(r.thinkingText)))
+	sum := sha256.Sum256([]byte(SanitizeUTF8(r.thinkingText)))
 	fmt.Fprintf(b, "%d|%t|%t|%t|%x;",
 		r.ordinal, r.isSystem, r.hasThinking, r.hasToolUse, sum)
 }
@@ -706,14 +704,14 @@ type toolCallFingerprintRow struct {
 }
 
 func (r toolCallFingerprintRow) appendTo(b *strings.Builder) {
-	toolName := stringutil.SanitizeUTF8(r.toolName)
-	category := stringutil.SanitizeUTF8(r.category)
-	toolUseID := stringutil.SanitizeUTF8(r.toolUseID)
-	inputJSON := stringutil.SanitizeUTF8(r.inputJSON)
-	skillName := stringutil.SanitizeUTF8(r.skillName)
-	subagentSessionID := stringutil.SanitizeUTF8(r.subagentSessionID)
-	resultContent := stringutil.SanitizeUTF8(r.resultContent)
-	filePath := stringutil.SanitizeUTF8(r.filePath)
+	toolName := SanitizeUTF8(r.toolName)
+	category := SanitizeUTF8(r.category)
+	toolUseID := SanitizeUTF8(r.toolUseID)
+	inputJSON := SanitizeUTF8(r.inputJSON)
+	skillName := SanitizeUTF8(r.skillName)
+	subagentSessionID := SanitizeUTF8(r.subagentSessionID)
+	resultContent := SanitizeUTF8(r.resultContent)
+	filePath := SanitizeUTF8(r.filePath)
 	fmt.Fprintf(b,
 		"%d|%d|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d|%d:%s|%d:%s;",
 		r.messageOrdinal, r.callIndex,
@@ -775,12 +773,12 @@ func (r toolResultEventFingerprintRow) appendTo(
 	if normalizeTimestamp != nil {
 		timestamp = normalizeTimestamp(timestamp)
 	}
-	toolUseID := stringutil.SanitizeUTF8(r.toolUseID)
-	agentID := stringutil.SanitizeUTF8(r.agentID)
-	subagentSessionID := stringutil.SanitizeUTF8(r.subagentSessionID)
-	source := stringutil.SanitizeUTF8(r.source)
-	status := stringutil.SanitizeUTF8(r.status)
-	content := stringutil.SanitizeUTF8(r.content)
+	toolUseID := SanitizeUTF8(r.toolUseID)
+	agentID := SanitizeUTF8(r.agentID)
+	subagentSessionID := SanitizeUTF8(r.subagentSessionID)
+	source := SanitizeUTF8(r.source)
+	status := SanitizeUTF8(r.status)
+	content := SanitizeUTF8(r.content)
 	contentSum := sha256.Sum256([]byte(content))
 	fmt.Fprintf(b,
 		"%d|%d|%d|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d|%x|%d:%s;",

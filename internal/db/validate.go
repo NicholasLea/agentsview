@@ -241,7 +241,7 @@ func sanitizeToolCallContent(
 	// The recorded rendering must keep matching the message content byte
 	// for byte after the content is sanitized, so it gets the same
 	// treatment. Its stripped bytes are already counted under the content.
-	tc.Rendering = stringutil.SanitizeUTF8(tc.Rendering)
+	tc.Rendering = SanitizeUTF8(tc.Rendering)
 	sanitizeLengthTrackedString(
 		&tc.ResultContent, &tc.ResultContentLength, stats,
 	)
@@ -385,7 +385,7 @@ func SanitizeSession(s *Session) ValidationStats {
 // removes NUL bytes and fixes invalid UTF-8; any of those changing the
 // string counts under the same category since they share the seam.
 func sanitizeStringField(p *string, stats *ValidationStats) {
-	clean := stringutil.SanitizeUTF8(*p)
+	clean := SanitizeUTF8(*p)
 	if clean != *p {
 		stats.ControlCharsStripped++
 		*p = clean

@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/agentsview/internal/db"
-	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 func TestSanitizeMessage(t *testing.T) {
@@ -542,8 +541,8 @@ func TestSanitizeUTF8Idempotent(t *testing.T) {
 		"emoji \U0001F600 ok",
 	}
 	for _, in := range inputs {
-		once := stringutil.SanitizeUTF8(in)
-		twice := stringutil.SanitizeUTF8(once)
+		once := db.SanitizeUTF8(in)
+		twice := db.SanitizeUTF8(once)
 		assert.Equal(t, once, twice, "SanitizeUTF8 must be idempotent for %q", in)
 		assert.True(t, utf8.ValidString(once), "result must be valid UTF-8 for %q", in)
 	}
@@ -557,5 +556,5 @@ func TestClampModelRuneBoundary(t *testing.T) {
 	assert.True(t, changed)
 	assert.True(t, utf8.ValidString(m), "clamped model must be valid UTF-8")
 	assert.LessOrEqual(t, len(m), maxModelLen)
-	assert.Equal(t, m, stringutil.SanitizeUTF8(m), "clamped model must survive re-sanitization")
+	assert.Equal(t, m, db.SanitizeUTF8(m), "clamped model must survive re-sanitization")
 }

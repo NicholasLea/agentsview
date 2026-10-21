@@ -16,7 +16,6 @@ import (
 	"unicode/utf8"
 
 	"go.kenn.io/agentsview/internal/export"
-	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 const conversationRevisionKey = "conversation_publication_revision"
@@ -290,7 +289,7 @@ func (db *DB) GetConversationMessage(ctx context.Context, opts ConversationMessa
 		} else if err != nil {
 			return ConversationMessage{}, err
 		}
-		text := stringutil.SanitizeUTF8(content)
+		text := SanitizeUTF8(content)
 		if sum := sha256.Sum256([]byte(text)); hex.EncodeToString(sum[:]) != result.Digest {
 			return ConversationMessage{}, ErrConversationRevisionChanged
 		}
@@ -384,7 +383,7 @@ func conversationRowFromMessage(m Message) (conversationRow, bool) {
 	if m.Content == "" {
 		row.Gap = "visible_text_unavailable"
 	} else {
-		row.body = new(stringutil.SanitizeUTF8(m.Content))
+		row.body = new(SanitizeUTF8(m.Content))
 		digest := sha256.Sum256([]byte(*row.body))
 		row.Digest, row.TextBytes = hex.EncodeToString(digest[:]), int64(len(*row.body))
 		if row.sourceID == "" {
