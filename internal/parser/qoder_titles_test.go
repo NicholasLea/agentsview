@@ -75,11 +75,42 @@ func TestQoderStoreTitles(t *testing.T) {
 	assert.Empty(t, empty)
 }
 
+// sealStore makes the directory around store unwritable, so a read-only open
+// that must create the missing WAL siblings fails instead of quietly making
+// them. Cleanup restores the mode ahead of the temp-dir removal.
+func sealStore(t *testing.T, store string) {
+	t.Helper()
+	dir := filepath.Dir(store)
+	require.NoError(t, os.Chmod(store, 0o400))
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chmod(dir, 0o700))
+		require.NoError(t, os.Chmod(store, 0o600))
+	})
+}
+
+// ordinaryReadOnlyTitle is the open the stable-snapshot fallback replaces: the
+// same DSN without immutable, so it needs write access to the directory.
+func ordinaryReadOnlyTitle(t *testing.T, store string) error {
+	t.Helper()
+	db, err := openSQLiteReadOnly(store, sqliteReadOptions{busyTimeoutMS: 3000})
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var title string
+	return db.QueryRowContext(t.Context(),
+		"SELECT title FROM chat_sessions WHERE session_id = 'id'").Scan(&title)
+}
+
 func TestQoderStoreTitlesOpenModes(t *testing.T) {
 	t.Run("no wal siblings", func(t *testing.T) {
 		_, store := qoderTitleHome(t)
 		testjsonl.SetQoderTitle(t, store, "id", "First")
 		closeWALStore(t, store)
+		sealStore(t, store)
+		require.Error(t, ordinaryReadOnlyTitle(t, store),
+			"the sealed fixture must really deny the open the fallback replaces")
 		assert.Equal(t, "First", readTitles(t, store)["id"])
 	})
 	t.Run("reader created empty wal", func(t *testing.T) {
@@ -87,6 +118,9 @@ func TestQoderStoreTitlesOpenModes(t *testing.T) {
 		testjsonl.SetQoderTitle(t, store, "id", "First")
 		closeWALStore(t, store)
 		require.NoError(t, os.WriteFile(store+"-wal", nil, 0o600))
+		sealStore(t, store)
+		require.Error(t, ordinaryReadOnlyTitle(t, store),
+			"the sealed fixture must really deny the open the fallback replaces")
 		assert.Equal(t, "First", readTitles(t, store)["id"])
 	})
 	t.Run("wal with frames", func(t *testing.T) {
