@@ -41,7 +41,7 @@ func InvalidateSQLiteTitles(path string) {
 // while the container state matches. Matching markers can hide writes, so
 // cached titles expire.
 func sqliteStoreTitles(
-	ctx context.Context, path, query string,
+	ctx context.Context, path, table, query string,
 ) (map[string]string, SQLiteContainerState, error) {
 	state, ok := StatSQLiteContainerState(path)
 	sqliteTitleCache.Lock()
@@ -52,7 +52,7 @@ func sqliteStoreTitles(
 		now.Sub(prior.readAt) < SQLiteContainerDigestVerifyInterval {
 		return prior.titles, prior.state, prior.err
 	}
-	titles, err := readSQLiteTitles(ctx, path, query)
+	titles, err := readSQLiteTitles(ctx, path, table, query)
 	if ctx.Err() != nil {
 		return nil, state, ctx.Err()
 	}
@@ -71,7 +71,7 @@ func sqliteStoreTitles(
 }
 
 func readSQLiteTitles(
-	ctx context.Context, path, query string,
+	ctx context.Context, path, table, query string,
 ) (map[string]string, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -89,6 +89,13 @@ func readSQLiteTitles(
 		return nil, err
 	}
 	defer db.Close()
+	var exists bool
+	if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)", table).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, nil
+	}
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -104,7 +111,7 @@ func readSQLiteTitles(
 		if !title.Valid {
 			continue
 		}
-		titles[id] = stringutil.SanitizeUTF8(strings.TrimSpace(title.String))
+		titles[id] = strings.TrimSpace(stringutil.SanitizeUTF8(title.String))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

@@ -98,8 +98,8 @@ func TestAntigravityTitleFailureDoesNotRetryOtherAgents(t *testing.T) {
 				repair := "DROP TRIGGER fail_title_write"
 				if mode == "watcher-read" {
 					failurePath = store
-					inject = "ALTER TABLE conversation_summaries RENAME TO unavailable_summaries"
-					repair = "ALTER TABLE unavailable_summaries RENAME TO conversation_summaries"
+					inject = "ALTER TABLE conversation_summaries RENAME COLUMN title TO unavailable_title"
+					repair = "ALTER TABLE conversation_summaries RENAME COLUMN unavailable_title TO title"
 				}
 				raw, err := sql.Open("sqlite3", failurePath)
 				require.NoError(t, err)

@@ -11,8 +11,11 @@ func (e *Engine) SnapshotAntigravityTitleStates() map[string]parser.SQLiteContai
 	e.syncMu.Lock()
 	defer e.syncMu.Unlock()
 	states := make(map[string]parser.SQLiteContainerState)
-	for path, applied := range e.appliedNativeTitles[parser.AgentAntigravity] {
-		states[path] = applied.state
+	for _, root := range e.sources().agentDirs[parser.AgentAntigravity] {
+		path := filepath.Join(root, parser.AntigravitySummariesDBName)
+		if applied, ok := e.appliedNativeTitles[path]; ok {
+			states[path] = applied.state
+		}
 	}
 	return states
 }
@@ -22,14 +25,14 @@ func (e *Engine) InjectAntigravityTitleStates(states map[string]parser.SQLiteCon
 	e.syncMu.Lock()
 	defer e.syncMu.Unlock()
 	if e.appliedNativeTitles == nil {
-		e.appliedNativeTitles = make(map[parser.AgentType]map[string]appliedNativeTitleStore)
+		e.appliedNativeTitles = make(map[string]appliedNativeTitleStore)
 	}
-	e.appliedNativeTitles[parser.AgentAntigravity] = make(map[string]appliedNativeTitleStore, len(states))
 	now := time.Now()
 	for _, root := range e.sources().agentDirs[parser.AgentAntigravity] {
 		path := filepath.Join(root, parser.AntigravitySummariesDBName)
+		delete(e.appliedNativeTitles, path)
 		if state, ok := states[path]; ok {
-			e.appliedNativeTitles[parser.AgentAntigravity][path] = appliedNativeTitleStore{state: state, readAt: now}
+			e.appliedNativeTitles[path] = appliedNativeTitleStore{state: state, readAt: now}
 		}
 	}
 }

@@ -42,16 +42,11 @@ func (e *Engine) reconcileNativeTitlesLocked(ctx context.Context, stats *SyncSta
 	}
 	sources := e.sources()
 	if e.appliedNativeTitles == nil {
-		e.appliedNativeTitles = make(map[parser.AgentType]map[string]appliedNativeTitleStore)
+		e.appliedNativeTitles = make(map[string]appliedNativeTitleStore)
 	}
 	for _, source := range nativeTitleSources {
 		if _, enabled := sources.providerFactories[source.agent]; !enabled {
 			continue
-		}
-		applied := e.appliedNativeTitles[source.agent]
-		if applied == nil {
-			applied = make(map[string]appliedNativeTitleStore)
-			e.appliedNativeTitles[source.agent] = applied
 		}
 		seen := make(map[string]bool)
 		for _, root := range sources.agentDirs[source.agent] {
@@ -65,10 +60,10 @@ func (e *Engine) reconcileNativeTitlesLocked(ctx context.Context, stats *SyncSta
 			seen[store] = true
 			state, exists := parser.StatSQLiteContainerState(store)
 			now := time.Now()
-			if prior, ok := applied[store]; ok && exists && prior.state == state && now.Sub(prior.readAt) < parser.SQLiteContainerDigestVerifyInterval {
+			if prior, ok := e.appliedNativeTitles[store]; ok && exists && prior.state == state && now.Sub(prior.readAt) < parser.SQLiteContainerDigestVerifyInterval {
 				continue
 			}
-			delete(applied, store)
+			delete(e.appliedNativeTitles, store)
 			parser.InvalidateSQLiteTitles(store)
 			titles, state, err := source.read(ctx, store)
 			if err == nil {
@@ -86,13 +81,16 @@ func (e *Engine) reconcileNativeTitlesLocked(ctx context.Context, stats *SyncSta
 				continue
 			}
 			if state != (parser.SQLiteContainerState{}) {
-				applied[store] = appliedNativeTitleStore{state: state, readAt: now}
+				e.appliedNativeTitles[store] = appliedNativeTitleStore{state: state, readAt: now}
 			}
 		}
 	}
 }
 
 func (e *Engine) invalidateNativeTitleCache(paths []string) {
+	if paths == nil {
+		clear(e.appliedNativeTitles)
+	}
 	for _, source := range nativeTitleSources {
 		reachable := make(map[string]bool)
 		for _, root := range e.sources().agentDirs[source.agent] {
@@ -101,7 +99,6 @@ func (e *Engine) invalidateNativeTitleCache(paths []string) {
 			}
 		}
 		if paths == nil {
-			clear(e.appliedNativeTitles[source.agent])
 			for store := range reachable {
 				parser.InvalidateSQLiteTitles(store)
 			}
@@ -117,7 +114,7 @@ func (e *Engine) invalidateNativeTitleCache(paths []string) {
 					continue
 				}
 			}
-			delete(e.appliedNativeTitles[source.agent], store)
+			delete(e.appliedNativeTitles, store)
 			parser.InvalidateSQLiteTitles(store)
 		}
 	}
@@ -168,7 +165,7 @@ func (e *Engine) applyNativeStoreTitles(ctx context.Context, source nativeTitleS
 		if !ok && !deferred {
 			continue
 		}
-		title := db.SanitizeUTF8(titles[strings.TrimPrefix(id, prefix)])
+		title := titles[strings.TrimPrefix(id, prefix)]
 		if title == "" && !source.blankClears {
 			continue
 		}

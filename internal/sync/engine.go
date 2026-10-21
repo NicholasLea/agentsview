@@ -586,9 +586,8 @@ type Engine struct {
 	// sessions that reach the replacement only through the orphan copy.
 	// Agents share it because every key carries its own agent prefix.
 	deferredNativeTitles map[string]*string
-	// Applied title-store state is tracked per agent so disabling one
-	// provider cannot suppress the other's refresh.
-	appliedNativeTitles map[parser.AgentType]map[string]appliedNativeTitleStore
+	// Providers have distinct title-store paths, checked only while enabled.
+	appliedNativeTitles map[string]appliedNativeTitleStore
 	// sourceSet holds the provider set and session roots this engine
 	// discovers from. ReconfigureSources replaces it as one snapshot.
 	sourceSet atomic.Pointer[engineSources]

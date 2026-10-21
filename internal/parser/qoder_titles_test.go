@@ -143,6 +143,7 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		{name: "no row no title", database: true},
 		{name: "blank row sidecar", database: true, row: "   ", sidecar: true, wantName: "From sidecar"},
 		{name: "blank row no title", database: true, row: "   "},
+		{name: "sanitized blank row sidecar", database: true, row: "\x00  \x00", sidecar: true, wantName: "From sidecar"},
 		{name: "stripped row sidecar", database: true, row: "\x00\x1b\u0080\x7f", sidecar: true, wantName: "From sidecar"},
 		{name: "stripped row no title", database: true, row: "\x00\x1b\u0080\x7f"},
 		{name: "sanitized database title", database: true, row: "\x00Real\t日本語\nTitle\x1b\u0080", sidecar: true, wantName: "Real\t日本語\nTitle", wantPresent: true},

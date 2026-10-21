@@ -124,6 +124,7 @@ func TestAntigravityTitlesFollowStore(t *testing.T) {
 				{title: "a\x00b", want: new("ab"), updates: 0},
 				{title: "\x00", want: nil, updates: 1},
 				{title: "\x00\x00", want: nil, updates: 0},
+				{title: "\x00  \x00", want: nil, updates: 0},
 			} {
 				dbtest.SetAntigravityTitle(t, root, tc.title)
 				plan, err := engine.PlanChangedPathsContext(t.Context(), []string{store})
@@ -183,7 +184,12 @@ func TestAntigravityUnreadableTitleStoreKeepsTitle(t *testing.T) {
 			require.NoError(t, os.WriteFile(store, data, 0o644))
 			dbtest.WriteAntigravityTitleTranscript(t, root, "hello again")
 			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript, store}))
-			engine.SyncAll(t.Context(), nil)
+			stats := engine.SyncAll(t.Context(), nil)
+			if name == "missing_table" {
+				assert.Zero(t, stats.Failed)
+			} else {
+				assert.Equal(t, 1, stats.Failed)
+			}
 			assert.Equal(t, new("First"), antigravityStoredTitle(t, archive), "an unreadable store keeps the stored title")
 		})
 	}
