@@ -6,6 +6,7 @@ import (
 
 	"go.kenn.io/agentsview/internal/db"
 	"go.kenn.io/agentsview/internal/parser"
+	"go.kenn.io/agentsview/internal/stringutil"
 	"go.kenn.io/agentsview/internal/usagefacts"
 )
 
@@ -274,7 +275,7 @@ func openCodeUsageLooksIncomplete(parsed, stored db.Message) bool {
 }
 
 func sanitizedMessageContentLength(message db.Message) int {
-	sanitized := db.SanitizeUTF8(message.Content)
+	sanitized := stringutil.SanitizeUTF8(message.Content)
 	if sanitized != message.Content {
 		return len(sanitized)
 	}

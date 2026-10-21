@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/agentsview/internal/export"
 	"go.kenn.io/agentsview/internal/money"
 	pricingpkg "go.kenn.io/agentsview/internal/pricing"
+	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 const pricingUpsertBatch = 100
@@ -361,18 +362,18 @@ func (s *Sync) syncCursorUsageEvents(ctx context.Context) error {
 		rows = append(rows, []any{
 			ev.ID,
 			&ts,
-			db.SanitizeUTF8(ev.Model),
-			db.SanitizeUTF8(ev.Kind),
+			stringutil.SanitizeUTF8(ev.Model),
+			stringutil.SanitizeUTF8(ev.Kind),
 			int64(ev.InputTokens),
 			int64(ev.OutputTokens),
 			int64(ev.CacheWriteTokens),
 			int64(ev.CacheReadTokens),
 			ev.Charged.Microdollars,
 			ev.CursorTokenFee.Microdollars,
-			db.SanitizeUTF8(ev.UserID),
-			db.SanitizeUTF8(ev.UserEmail),
+			stringutil.SanitizeUTF8(ev.UserID),
+			stringutil.SanitizeUTF8(ev.UserEmail),
 			ev.IsHeadless,
-			db.SanitizeUTF8(ev.DedupKey),
+			stringutil.SanitizeUTF8(ev.DedupKey),
 			version,
 		})
 		if ev.ID > maxID {

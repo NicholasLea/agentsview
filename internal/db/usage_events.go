@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"go.kenn.io/agentsview/internal/money"
+	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 // UsageEvent records token and cost accounting that does not belong
@@ -276,12 +277,12 @@ func appendUsageEventFingerprints(
 		// Sanitize before measuring so fingerprints match the
 		// PG-readback fingerprint, whose values were sanitized
 		// at insert time (see SanitizeUTF8).
-		source = SanitizeUTF8(source)
-		model = SanitizeUTF8(model)
-		providerID = SanitizeUTF8(providerID)
-		costStatus = SanitizeUTF8(costStatus)
-		costSource = SanitizeUTF8(costSource)
-		dedupKey.String = SanitizeUTF8(dedupKey.String)
+		source = stringutil.SanitizeUTF8(source)
+		model = stringutil.SanitizeUTF8(model)
+		providerID = stringutil.SanitizeUTF8(providerID)
+		costStatus = stringutil.SanitizeUTF8(costStatus)
+		costSource = stringutil.SanitizeUTF8(costSource)
+		dedupKey.String = stringutil.SanitizeUTF8(dedupKey.String)
 		records[sessionID] = append(records[sessionID], fmt.Sprintf(
 			"%t|%d|%d:%s|%d:%s|%d:%s|%d|%d|%d|%d|%d|%t|%d|%d:%s|%d:%s|%d:%s|%d:%s;",
 			ordinal.Valid,

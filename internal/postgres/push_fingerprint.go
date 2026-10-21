@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"go.kenn.io/agentsview/internal/db"
+	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 const pushComparisonBatchSize = 900
@@ -501,7 +502,7 @@ func loadPushMessageContentHashFingerprints(
 		if err := rows.Scan(&sessionID, &ordinal, &content, &contentLength); err != nil {
 			return err
 		}
-		sum := sha256.Sum256([]byte(db.SanitizeUTF8(content)))
+		sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(content)))
 		b := builders[sessionID]
 		if b == nil {
 			b = &strings.Builder{}
@@ -599,7 +600,7 @@ func loadPushMessageFlagFingerprints(
 		); err != nil {
 			return err
 		}
-		sum := sha256.Sum256([]byte(db.SanitizeUTF8(thinkingText)))
+		sum := sha256.Sum256([]byte(stringutil.SanitizeUTF8(thinkingText)))
 		b := builders[sessionID]
 		if b == nil {
 			b = &strings.Builder{}
@@ -944,12 +945,12 @@ func loadPushToolResultEventFingerprints(
 		if timestamp.Valid {
 			timestampText = FormatISO8601(timestamp.Time)
 		}
-		toolUseID = db.SanitizeUTF8(toolUseID)
-		agentID = db.SanitizeUTF8(agentID)
-		subagentSessionID = db.SanitizeUTF8(subagentSessionID)
-		source = db.SanitizeUTF8(source)
-		status = db.SanitizeUTF8(status)
-		content = db.SanitizeUTF8(content)
+		toolUseID = stringutil.SanitizeUTF8(toolUseID)
+		agentID = stringutil.SanitizeUTF8(agentID)
+		subagentSessionID = stringutil.SanitizeUTF8(subagentSessionID)
+		source = stringutil.SanitizeUTF8(source)
+		status = stringutil.SanitizeUTF8(status)
+		content = stringutil.SanitizeUTF8(content)
 		contentSum := sha256.Sum256([]byte(content))
 		fmt.Fprintf(
 			b,
@@ -1018,12 +1019,12 @@ func pgToolResultEventFingerprint(
 		if timestamp.Valid {
 			timestampText = FormatISO8601(timestamp.Time)
 		}
-		toolUseID = db.SanitizeUTF8(toolUseID)
-		agentID = db.SanitizeUTF8(agentID)
-		subagentSessionID = db.SanitizeUTF8(subagentSessionID)
-		source = db.SanitizeUTF8(source)
-		status = db.SanitizeUTF8(status)
-		content = db.SanitizeUTF8(content)
+		toolUseID = stringutil.SanitizeUTF8(toolUseID)
+		agentID = stringutil.SanitizeUTF8(agentID)
+		subagentSessionID = stringutil.SanitizeUTF8(subagentSessionID)
+		source = stringutil.SanitizeUTF8(source)
+		status = stringutil.SanitizeUTF8(status)
+		content = stringutil.SanitizeUTF8(content)
 		contentSum := sha256.Sum256([]byte(content))
 		fmt.Fprintf(&b,
 			"%d|%d|%d|%d:%s|%d:%s|%d:%s|%d:%s|%d:%s|%d|%x|%d:%s;",

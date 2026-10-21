@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.kenn.io/agentsview/internal/money"
+	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 // CursorUsageEvent stores authoritative Cursor admin usage data.
@@ -108,11 +109,11 @@ func (db *DB) InsertCursorUsageEvents(ctx context.Context,
 				charged_microdollars, cursor_token_fee_microdollars,
 				user_id, user_email, is_headless, dedup_key
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			ev.OccurredAt, SanitizeUTF8(ev.Model), SanitizeUTF8(ev.Kind),
+			ev.OccurredAt, stringutil.SanitizeUTF8(ev.Model), stringutil.SanitizeUTF8(ev.Kind),
 			ev.InputTokens, ev.OutputTokens,
 			ev.CacheWriteTokens, ev.CacheReadTokens,
 			ev.Charged.Microdollars, ev.CursorTokenFee.Microdollars,
-			SanitizeUTF8(ev.UserID), SanitizeUTF8(ev.UserEmail),
+			stringutil.SanitizeUTF8(ev.UserID), stringutil.SanitizeUTF8(ev.UserEmail),
 			isHeadless, ev.DedupKey,
 		); err != nil {
 			return fmt.Errorf("inserting cursor usage event: %w", err)
@@ -133,8 +134,8 @@ func CursorUsageEventDedupKey(ev CursorUsageEvent) string {
 	b.Grow(256)
 	fmt.Fprintf(&b, "%s|%s|%s|%d|%d|%d|%d|%s|%s|%t|%s|%s",
 		cursorUsageEventFingerprintTimestamp(ev.OccurredAt),
-		SanitizeUTF8(ev.Model),
-		SanitizeUTF8(ev.Kind),
+		stringutil.SanitizeUTF8(ev.Model),
+		stringutil.SanitizeUTF8(ev.Kind),
 		ev.InputTokens,
 		ev.OutputTokens,
 		ev.CacheWriteTokens,
@@ -142,8 +143,8 @@ func CursorUsageEventDedupKey(ev CursorUsageEvent) string {
 		formatMicrodollarsAsLegacyCents(ev.Charged.Microdollars),
 		formatMicrodollarsAsLegacyCents(ev.CursorTokenFee.Microdollars),
 		ev.IsHeadless,
-		SanitizeUTF8(ev.UserID),
-		SanitizeUTF8(ev.UserEmail),
+		stringutil.SanitizeUTF8(ev.UserID),
+		stringutil.SanitizeUTF8(ev.UserEmail),
 	)
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
@@ -257,11 +258,11 @@ func (db *DB) CursorUsageEventFingerprint(ctx context.Context) (string, error) {
 		); err != nil {
 			return "", fmt.Errorf("scanning cursor usage fingerprint: %w", err)
 		}
-		ev.Model = SanitizeUTF8(ev.Model)
-		ev.Kind = SanitizeUTF8(ev.Kind)
-		ev.UserID = SanitizeUTF8(ev.UserID)
-		ev.UserEmail = SanitizeUTF8(ev.UserEmail)
-		ev.DedupKey = SanitizeUTF8(ev.DedupKey)
+		ev.Model = stringutil.SanitizeUTF8(ev.Model)
+		ev.Kind = stringutil.SanitizeUTF8(ev.Kind)
+		ev.UserID = stringutil.SanitizeUTF8(ev.UserID)
+		ev.UserEmail = stringutil.SanitizeUTF8(ev.UserEmail)
+		ev.DedupKey = stringutil.SanitizeUTF8(ev.DedupKey)
 		fmt.Fprintf(&b, "%d:%s|%d:%s|%d:%s|%d|%d|%d|%d|%d|%d|%d:%s|%d:%s|%t|%d:%s;",
 			len(ev.OccurredAt), ev.OccurredAt,
 			len(ev.Model), ev.Model,

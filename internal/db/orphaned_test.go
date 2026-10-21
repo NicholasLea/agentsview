@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 func TestCopyOrphanedDataCodexTrashIsNotAReparse(t *testing.T) {
@@ -642,7 +644,7 @@ func TestCopyOrphanedDataSanitizesCopiedContent(t *testing.T) {
 		 WHERE session_id = ? AND ordinal = 0`,
 		"poison-orphan",
 	).Scan(&gotMessage, &gotMessageLength), "query copied message")
-	wantMessage := SanitizeUTF8(messageContent)
+	wantMessage := stringutil.SanitizeUTF8(messageContent)
 	assert.Equal(t, wantMessage, gotMessage)
 	assert.Equal(t, len(wantMessage)+messageLengthExcess, gotMessageLength)
 
@@ -653,7 +655,7 @@ func TestCopyOrphanedDataSanitizesCopiedContent(t *testing.T) {
 		 WHERE session_id = ? AND call_index = 0`,
 		"poison-orphan",
 	).Scan(&gotToolInput), "query copied tool input")
-	assert.Equal(t, SanitizeUTF8(toolInput), gotToolInput)
+	assert.Equal(t, stringutil.SanitizeUTF8(toolInput), gotToolInput)
 
 	var gotEmptyToolInput sql.NullString
 	require.NoError(t, dstDB.getReader().QueryRowContext(ctx,
@@ -672,7 +674,7 @@ func TestCopyOrphanedDataSanitizesCopiedContent(t *testing.T) {
 		 WHERE session_id = ? AND call_index = 0`,
 		"poison-orphan",
 	).Scan(&gotToolResult, &gotToolResultLength), "query copied tool call")
-	wantToolResult := SanitizeUTF8(toolResult)
+	wantToolResult := stringutil.SanitizeUTF8(toolResult)
 	assert.Equal(t, wantToolResult, gotToolResult)
 	assert.Equal(t, len(wantToolResult)+toolLengthExcess, gotToolResultLength)
 
@@ -701,7 +703,7 @@ func TestCopyOrphanedDataSanitizesCopiedContent(t *testing.T) {
 		 WHERE session_id = ? AND event_index = 0`,
 		"poison-orphan",
 	).Scan(&gotEventContent, &gotEventLength), "query copied tool result event")
-	wantEventContent := SanitizeUTF8(eventContent)
+	wantEventContent := stringutil.SanitizeUTF8(eventContent)
 	assert.Equal(t, wantEventContent, gotEventContent)
 	assert.Equal(t, len(wantEventContent)+eventLengthExcess, gotEventLength)
 }
@@ -746,7 +748,7 @@ func TestCopySkipsSanitizeForSanitizedSource(t *testing.T) {
 			// input_json, so only the input pass runs for it.
 			name:          "content-sanitized source pays input pass",
 			sourceVersion: sanitizedSourceDataVersion,
-			wantInput:     SanitizeUTF8(rawToolInput),
+			wantInput:     stringutil.SanitizeUTF8(rawToolInput),
 		},
 		{
 			// A source at the input watermark is fully clean; every

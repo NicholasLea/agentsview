@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/agentsview/internal/money"
 	pricingpkg "go.kenn.io/agentsview/internal/pricing"
 	"go.kenn.io/agentsview/internal/storage"
+	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 func (s *Sync) syncModelPricing(ctx context.Context) error {
@@ -1466,18 +1467,18 @@ func (s *Sync) bulkInsertCursorUsageEvents(
 			}
 			args = append(args,
 				occurredAt,
-				db.SanitizeUTF8(ev.Model),
-				db.SanitizeUTF8(ev.Kind),
+				stringutil.SanitizeUTF8(ev.Model),
+				stringutil.SanitizeUTF8(ev.Kind),
 				ev.InputTokens,
 				ev.OutputTokens,
 				ev.CacheWriteTokens,
 				ev.CacheReadTokens,
 				ev.Charged.Microdollars,
 				ev.CursorTokenFee.Microdollars,
-				db.SanitizeUTF8(ev.UserID),
-				db.SanitizeUTF8(ev.UserEmail),
+				stringutil.SanitizeUTF8(ev.UserID),
+				stringutil.SanitizeUTF8(ev.UserEmail),
 				ev.IsHeadless,
-				db.SanitizeUTF8(ev.DedupKey),
+				stringutil.SanitizeUTF8(ev.DedupKey),
 			)
 		}
 		b.WriteString(` ON CONFLICT DO NOTHING`)

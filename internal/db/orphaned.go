@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.kenn.io/agentsview/internal/parser"
+	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 type sqlContextExecer interface {
@@ -2726,7 +2727,7 @@ func sanitizeCopiedMessageContent(
 		if err := rows.Scan(&row.id, &row.content, &storedLength); err != nil {
 			return fmt.Errorf("scanning copied message: %w", err)
 		}
-		sanitized := SanitizeUTF8(row.content)
+		sanitized := stringutil.SanitizeUTF8(row.content)
 		if sanitized == row.content {
 			continue
 		}
@@ -2784,7 +2785,7 @@ func sanitizeCopiedToolCallInputs(
 		if !content.Valid {
 			continue
 		}
-		sanitized := SanitizeUTF8(content.String)
+		sanitized := stringutil.SanitizeUTF8(content.String)
 		if sanitized == content.String {
 			continue
 		}
@@ -2838,7 +2839,7 @@ func sanitizeCopiedToolCallResults(
 		if !content.Valid {
 			continue
 		}
-		sanitized := SanitizeUTF8(content.String)
+		sanitized := stringutil.SanitizeUTF8(content.String)
 		if sanitized == content.String {
 			continue
 		}
@@ -2891,7 +2892,7 @@ func sanitizeCopiedToolResultEvents(
 		if err := rows.Scan(&row.id, &row.content, &storedLength); err != nil {
 			return fmt.Errorf("scanning copied tool result event: %w", err)
 		}
-		sanitized := SanitizeUTF8(row.content)
+		sanitized := stringutil.SanitizeUTF8(row.content)
 		if sanitized == row.content {
 			continue
 		}
