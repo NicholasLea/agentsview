@@ -26,7 +26,7 @@ const qoderTitleQuery = "SELECT session_id, title FROM chat_sessions"
 
 // QoderStoreTitles reads the titles from one Qoder application database.
 func QoderStoreTitles(ctx context.Context, path string) (map[string]string, SQLiteContainerState, error) {
-	return sqliteStoreTitles(ctx, path, "chat_sessions", qoderTitleQuery)
+	return sqliteStoreTitles(ctx, path, "chat_sessions", "session_id", qoderTitleQuery)
 }
 
 // QoderSessionRoot returns the canonical default root that owns a transcript

@@ -1,7 +1,9 @@
 package sync_test
 
 import (
+	"database/sql"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -53,17 +55,35 @@ func TestQoderTitleFallbackOnReparse(t *testing.T) {
 }
 
 func TestQoderMissingRowFollowsSidecarUpdates(t *testing.T) {
-	for _, custom := range []bool{false, true} {
-		name := "default root"
-		if custom {
-			name = "custom root"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, schema string
+		custom       bool
+	}{
+		{name: "default root"},
+		{name: "custom root", custom: true},
+		{name: "missing session_id", schema: "CREATE TABLE chat_sessions (title TEXT)"},
+		{name: "missing title", schema: "CREATE TABLE chat_sessions (session_id TEXT)"},
+		{name: "missing both columns", schema: "CREATE TABLE chat_sessions (value TEXT)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			root, store := testjsonl.QoderTitleRoot(t)
+			custom := tc.custom
 			if custom {
 				root = t.TempDir()
 			}
-			testjsonl.SetQoderTitle(t, store, "other-session", "Other title")
+			if tc.schema == "" {
+				testjsonl.SetQoderTitle(t, store, "other-session", "Other title")
+			} else {
+				require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
+				conn, err := sql.Open("sqlite3", store)
+				require.NoError(t, err)
+				defer conn.Close()
+				_, err = conn.ExecContext(t.Context(), tc.schema)
+				require.NoError(t, err)
+				titles, _, err := parser.QoderStoreTitles(t.Context(), store)
+				require.NoError(t, err)
+				assert.Empty(t, titles)
+			}
 			transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
 			sidecar := strings.TrimSuffix(transcript, ".jsonl") + "-session.json"
 			archive := dbtest.OpenTestDB(t)

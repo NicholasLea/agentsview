@@ -13,7 +13,7 @@ const antigravityTitleQuery = "SELECT conversation_id, title FROM conversation_s
 
 // Matching markers can hide writes, so cached titles expire.
 func AntigravityStoreTitles(ctx context.Context, path string) (map[string]string, SQLiteContainerState, error) {
-	return sqliteStoreTitles(ctx, path, "conversation_summaries", antigravityTitleQuery)
+	return sqliteStoreTitles(ctx, path, "conversation_summaries", "conversation_id", antigravityTitleQuery)
 }
 
 // AntigravitySessionRoot returns the Antigravity root that owns a stored

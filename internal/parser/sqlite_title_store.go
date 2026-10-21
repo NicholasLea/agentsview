@@ -41,7 +41,7 @@ func InvalidateSQLiteTitles(path string) {
 // while the container state matches. Matching markers can hide writes, so
 // cached titles expire.
 func sqliteStoreTitles(
-	ctx context.Context, path, table, query string,
+	ctx context.Context, path, table, idColumn, query string,
 ) (map[string]string, SQLiteContainerState, error) {
 	state, ok := StatSQLiteContainerState(path)
 	sqliteTitleCache.Lock()
@@ -52,7 +52,7 @@ func sqliteStoreTitles(
 		now.Sub(prior.readAt) < SQLiteContainerDigestVerifyInterval {
 		return prior.titles, prior.state, prior.err
 	}
-	titles, err := readSQLiteTitles(ctx, path, table, query)
+	titles, err := readSQLiteTitles(ctx, path, table, idColumn, query)
 	if ctx.Err() != nil {
 		return nil, state, ctx.Err()
 	}
@@ -71,7 +71,7 @@ func sqliteStoreTitles(
 }
 
 func readSQLiteTitles(
-	ctx context.Context, path, table, query string,
+	ctx context.Context, path, table, idColumn, query string,
 ) (map[string]string, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -90,7 +90,9 @@ func readSQLiteTitles(
 	}
 	defer db.Close()
 	var exists bool
-	if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)", table).Scan(&exists); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT
+		EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)
+		AND (SELECT COUNT(*) FROM pragma_table_info(?) WHERE name IN (?, 'title')) = 2`, table, table, idColumn).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if !exists {
