@@ -30,14 +30,12 @@ func QoderStoreTitles(ctx context.Context, path string) (map[string]string, SQLi
 	return qoderSchemalessTitles(sqliteStoreTitles(ctx, path, qoderTitleQuery))
 }
 
-// qoderSchemalessTitles reports an application database without a
-// chat_sessions title schema as holding no titles, so a general app database
-// without them is not a read failure.
+// qoderSchemalessTitles treats an application database without a chat_sessions
+// table as holding no titles.
 func qoderSchemalessTitles(
 	titles map[string]string, state SQLiteContainerState, err error,
 ) (map[string]string, SQLiteContainerState, error) {
-	if err != nil && (strings.Contains(err.Error(), "no such table: chat_sessions") ||
-		strings.Contains(err.Error(), "no such column:")) {
+	if err != nil && strings.Contains(err.Error(), "no such table: chat_sessions") {
 		return nil, state, nil
 	}
 	return titles, state, err

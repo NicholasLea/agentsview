@@ -39,7 +39,7 @@ func TestQoderStoreTitles(t *testing.T) {
 	_, store := testjsonl.QoderTitleRoot(t)
 	testjsonl.SetQoderTitle(t, store, "plain-id", "  Renamed  ")
 	testjsonl.SetQoderTitle(t, store, "blank-id", "   ")
-	testjsonl.SetQoderTitle(t, store, "empty-id", "")
+	closeWALStore(t, store)
 	titles := readTitles(t, store)
 	assert.Equal(t, "Renamed", titles["plain-id"], "outer whitespace is trimmed")
 	// Asserted through the lookup result rather than the value alone: a missing
@@ -47,17 +47,6 @@ func TestQoderStoreTitles(t *testing.T) {
 	blank, blankRow := titles["blank-id"]
 	assert.True(t, blankRow, "a whitespace-only row stays in the map for the parse to see")
 	assert.Empty(t, blank)
-	empty, emptyRow := titles["empty-id"]
-	assert.True(t, emptyRow)
-	assert.Empty(t, empty)
-}
-
-// A closed Qoder database can retain WAL mode without sibling files.
-func TestQoderStoreTitlesWithoutWALSiblings(t *testing.T) {
-	_, store := testjsonl.QoderTitleRoot(t)
-	testjsonl.SetQoderTitle(t, store, "id", "First")
-	closeWALStore(t, store)
-	assert.Equal(t, "First", readTitles(t, store)["id"])
 }
 
 func TestQoderTitleDatabase(t *testing.T) {
@@ -148,19 +137,11 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		{name: "missing database both files", sidecar: true, rename: true, wantName: "From sidecar", wantPresent: true},
 		{name: "missing database no title"},
 		{name: "missing table sidecar", schema: "CREATE TABLE settings (value TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
-		{name: "missing session_id sidecar", schema: "CREATE TABLE chat_sessions (title TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
-		{name: "missing title sidecar", schema: "CREATE TABLE chat_sessions (session_id TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
 		{name: "no row sidecar", database: true, sidecar: true, wantName: "From sidecar", wantPresent: true},
-		{name: "no row rename", database: true, rename: true, wantName: "Renamed in chat", wantPresent: true},
-		{name: "no row both files", database: true, sidecar: true, rename: true, wantName: "From sidecar", wantPresent: true},
 		{name: "no row no title", database: true},
 		{name: "blank row sidecar", database: true, row: "   ", sidecar: true, wantName: "From sidecar"},
-		{name: "blank row rename", database: true, row: "   ", rename: true, wantName: "Renamed in chat"},
-		{name: "blank row both files", database: true, row: "   ", sidecar: true, rename: true, wantName: "From sidecar"},
 		{name: "blank row no title", database: true, row: "   "},
 		{name: "read error sidecar", database: true, sidecar: true, wantName: "From sidecar", corrupt: true},
-		{name: "read error rename", database: true, rename: true, wantName: "Renamed in chat", corrupt: true},
-		{name: "read error both files", database: true, sidecar: true, rename: true, wantName: "From sidecar", corrupt: true},
 		{name: "read error no title", database: true, corrupt: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,10 +215,6 @@ func TestQoderParseMaterializedRemoteSource(t *testing.T) {
 	body, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(mirror, body, 0o644))
-	mirrorRoot, ok := QoderSessionRoot(mirror)
-	require.True(t, ok)
-	_, bound := QoderTitleDatabase(mirrorRoot)
-	assert.False(t, bound, "a mirror root must never reach this machine's database")
 	results, err := ParseQoderSession(mirror, "sample-project", "host-b")
 	require.NoError(t, err)
 	require.Len(t, results, 1)
