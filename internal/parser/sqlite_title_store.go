@@ -9,7 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
+
+	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 // sqliteTitleSnapshot is one cached read of a native title database.
@@ -103,14 +104,7 @@ func readSQLiteTitles(
 		if !title.Valid {
 			continue
 		}
-		// Match db.SanitizeUTF8 before callers decide whether a title is present.
-		text := strings.ReplaceAll(strings.TrimSpace(title.String), "\x00", "")
-		titles[id] = strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) && r != '\n' && r != '\t' && r != '\r' {
-				return -1
-			}
-			return r
-		}, strings.ToValidUTF8(text, ""))
+		titles[id] = stringutil.SanitizeUTF8(strings.TrimSpace(title.String))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
