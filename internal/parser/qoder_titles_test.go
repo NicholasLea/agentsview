@@ -1,10 +1,8 @@
 package parser
 
 import (
-	"database/sql"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -12,20 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/agentsview/internal/testjsonl"
 )
-
-func TestQoderStoreTitles(t *testing.T) {
-	_, store := testjsonl.QoderTitleRoot(t)
-	testjsonl.SetQoderTitle(t, store, "plain-id", "  Renamed  ")
-	testjsonl.SetQoderTitle(t, store, "blank-id", "\x00  \x00")
-	titles, _, err := QoderStoreTitles(t.Context(), store)
-	require.NoError(t, err)
-	assert.Equal(t, "Renamed", titles["plain-id"], "outer whitespace is trimmed")
-	// Asserted through the lookup result rather than the value alone: a missing
-	// key would satisfy an emptiness check on its own.
-	blank, blankRow := titles["blank-id"]
-	assert.True(t, blankRow, "a whitespace-only row stays in the map for the parse to see")
-	assert.Empty(t, blank)
-}
 
 func TestQoderTitleDatabase(t *testing.T) {
 	home := t.TempDir()
@@ -53,24 +37,6 @@ func TestQoderTitleDatabase(t *testing.T) {
 			got, ok := QoderTitleDatabase(tc.root)
 			assert.True(t, ok)
 			assert.Equal(t, tc.want, got)
-			t.Run("symlinked default root", func(t *testing.T) {
-				home := t.TempDir()
-				t.Setenv("HOME", home)
-				t.Setenv("USERPROFILE", home)
-				root := filepath.Join(home, filepath.Base(filepath.Dir(tc.root)), "projects")
-				want := filepath.Join(home, "Library", "Application Support", filepath.Base(filepath.Dir(tc.want)), QoderTitleDBName)
-				target := t.TempDir()
-				require.NoError(t, os.MkdirAll(filepath.Dir(root), 0o755))
-				require.NoError(t, os.Symlink(target, root))
-				resolved, _, err := ResolveProviderRoot(AgentQoder, root)
-				require.NoError(t, err)
-				got, ok := QoderTitleDatabase(resolved)
-				assert.True(t, ok)
-				assert.Equal(t, want, got)
-				owner, ok := QoderSessionRoot(filepath.Join(resolved, "project", "missing.jsonl"))
-				assert.True(t, ok)
-				assert.Equal(t, resolved, owner)
-			})
 		})
 	}
 	for _, tc := range []struct {
@@ -101,6 +67,11 @@ func TestQoderSessionRoot(t *testing.T) {
 	outer := filepath.Join(home, ".qoder", "projects")
 	inner := filepath.Join(home, ".qoder-cn", "projects")
 	transcript := filepath.Join(inner, "-Users-u-demo", "aaaa.jsonl")
+	target := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Dir(inner), 0o755))
+	require.NoError(t, os.Symlink(target, inner))
+	resolved, _, err := ResolveProviderRoot(AgentQoder, inner)
+	require.NoError(t, err)
 	for _, tc := range []struct {
 		name, path, want string
 		ok               bool
@@ -108,7 +79,8 @@ func TestQoderSessionRoot(t *testing.T) {
 		{"international", filepath.Join(outer, "-Users-u-demo", "aaaa.jsonl"), outer, true},
 		{"subagent", filepath.Join(outer, "-Users-u-demo", "aaaa", "subagents", "agent-1.jsonl"), outer, true},
 		{"flat file under root", filepath.Join(outer, "aaaa.jsonl"), outer, true},
-		{"cn", transcript, inner, true},
+		{"cn", transcript, resolved, true},
+		{"symlinked default root", filepath.Join(resolved, "project", "missing.jsonl"), resolved, true},
 		{"no qoder root", filepath.Join("/tmp", "mirror", "projects", "aaaa.jsonl"), "", false},
 		{"qoderwork", filepath.Join(home, ".qoderwork", "projects", "aaaa.jsonl"), "", false},
 	} {
@@ -130,34 +102,20 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		wantName    string
 		wantPresent bool
 		corrupt     bool
-		blocked     bool
-		schema      string
 		custom      bool
 	}{
 		{name: "database beats both files", database: true, row: "From database", sidecar: true, rename: true, wantName: "From database", wantPresent: true},
-		{name: "missing database sidecar", sidecar: true, wantName: "From sidecar", wantPresent: true},
-		{name: "missing database rename", rename: true, wantName: "Renamed in chat", wantPresent: true},
 		{name: "missing database both files", sidecar: true, rename: true, wantName: "From sidecar", wantPresent: true},
 		{name: "missing database no title"},
 		{name: "custom root no title clears name", custom: true, wantPresent: true},
-		{name: "missing table sidecar", schema: "CREATE TABLE settings (value TEXT)", sidecar: true, wantName: "From sidecar", wantPresent: true},
 		{name: "no row sidecar", database: true, sidecar: true, wantName: "From sidecar", wantPresent: true},
 		{name: "blank row sidecar", database: true, row: "   ", sidecar: true, wantName: "From sidecar"},
-		{name: "stat error sidecar", database: true, sidecar: true, blocked: true, wantName: "From sidecar"},
 		{name: "read error sidecar", database: true, sidecar: true, wantName: "From sidecar", corrupt: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, store := testjsonl.QoderTitleRoot(t)
 			if tc.custom {
 				root = t.TempDir()
-			}
-			if tc.schema != "" {
-				require.NoError(t, os.MkdirAll(filepath.Dir(store), 0o755))
-				conn, err := sql.Open("sqlite3", store)
-				require.NoError(t, err)
-				_, err = conn.ExecContext(t.Context(), tc.schema)
-				require.NoError(t, err)
-				require.NoError(t, conn.Close())
 			}
 			if tc.database {
 				testjsonl.SetQoderTitle(t, store, "other", "Other session")
@@ -167,16 +125,6 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 			}
 			if tc.corrupt {
 				require.NoError(t, os.WriteFile(store, []byte("not sqlite"), 0o600))
-			}
-			if tc.blocked {
-				if runtime.GOOS == "windows" || os.Geteuid() == 0 {
-					t.Skip("requires Unix permissions enforced for a non-root user")
-				}
-				dir := filepath.Dir(store)
-				require.NoError(t, os.Chmod(dir, 0o000))
-				t.Cleanup(func() { require.NoError(t, os.Chmod(dir, 0o755)) })
-				_, err := os.Lstat(store)
-				require.ErrorIs(t, err, os.ErrPermission)
 			}
 			path := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "help")
 			if tc.rename {

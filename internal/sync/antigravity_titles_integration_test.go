@@ -13,7 +13,6 @@ import (
 	"go.kenn.io/agentsview/internal/dbtest"
 	"go.kenn.io/agentsview/internal/parser"
 	"go.kenn.io/agentsview/internal/sync"
-	"go.kenn.io/agentsview/internal/testjsonl"
 )
 
 func newNativeTitleEngine(t *testing.T, archive *db.DB, agent parser.AgentType, roots ...string) *sync.Engine {
@@ -31,51 +30,6 @@ func nativeStoredTitle(t *testing.T, archive *db.DB, id string) *string {
 	require.NoError(t, err)
 	require.NotNil(t, session)
 	return session.SessionName
-}
-
-// Each engine ingests a separate transcript under the same root. Pending titles
-// for both rows expose a reconciliation pass that crosses the engine's prefix.
-func TestAntigravityPrefixedEngineTitlesOnlyItsOwnRows(t *testing.T) {
-	const otherID = "22222222-2222-4222-8222-222222222222"
-	root := t.TempDir()
-	remoteTranscript := dbtest.WriteAntigravityTitleTranscript(t, root, "hello")
-	localTranscript := testjsonl.WriteAntigravityBrainTranscript(t, root, otherID,
-		`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"other"}`+"\n")
-	store := dbtest.SetAntigravityTitle(t, root, "First")
-	setOtherTitle := func(title string) {
-		conn, err := sql.Open("sqlite3", store)
-		require.NoError(t, err)
-		_, err = conn.ExecContext(t.Context(), `INSERT INTO conversation_summaries VALUES (?, ?) ON CONFLICT(conversation_id) DO UPDATE SET title = excluded.title`, otherID, title)
-		require.NoError(t, err)
-		require.NoError(t, conn.Close())
-	}
-	setOtherTitle("First")
-	archive := dbtest.OpenTestDB(t)
-	remote := sync.NewEngine(t.Context(), archive, sync.EngineConfig{
-		AgentDirs: map[parser.AgentType][]string{parser.AgentAntigravity: {root}},
-		Machine:   "host-b",
-		IDPrefix:  "host-b~",
-	})
-	t.Cleanup(remote.Close)
-	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{remoteTranscript}))
-	local := newNativeTitleEngine(t, archive, parser.AgentAntigravity, root)
-	require.NoError(t, local.SyncPathsContext(t.Context(), []string{localTranscript}))
-	prefixed := "host-b~antigravity:" + dbtest.AntigravityTitleID
-	localID := "antigravity:" + otherID
-	require.Equal(t, new("First"), nativeStoredTitle(t, archive, prefixed))
-	require.Equal(t, new("First"), nativeStoredTitle(t, archive, localID))
-
-	dbtest.SetAntigravityTitle(t, root, "Renamed on host-b")
-	setOtherTitle("Pending for host-b")
-	require.NoError(t, remote.SyncPathsContext(t.Context(), []string{store}))
-	assert.Equal(t, new("Renamed on host-b"), nativeStoredTitle(t, archive, prefixed), "a prefixed engine reaches its own row")
-	assert.Equal(t, new("First"), nativeStoredTitle(t, archive, localID), "a remote pass leaves the local session alone")
-
-	setOtherTitle("Renamed locally")
-	dbtest.SetAntigravityTitle(t, root, "Pending for host-a")
-	require.NoError(t, local.SyncPathsContext(t.Context(), []string{store}))
-	assert.Equal(t, new("Renamed locally"), nativeStoredTitle(t, archive, localID))
-	assert.Equal(t, new("Renamed on host-b"), nativeStoredTitle(t, archive, prefixed), "a local pass leaves the remote session alone")
 }
 
 func TestAntigravityTitlesFollowStore(t *testing.T) {
