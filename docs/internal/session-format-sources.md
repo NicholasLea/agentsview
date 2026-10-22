@@ -4151,26 +4151,12 @@ schemas keep their existing ordering behavior.
   not establish behavior for other Qoder releases or platforms. A root is bound
   to its database only by a canonical absolute home-anchored path. Each title
   lookup resolves the default-root symlinks to match the configured canonical
-  root. Transcript membership is
-  lexical under either the unresolved or resolved default root. A custom root,
-  or a remote mirror unpacked under a temp directory whose trailing segments
-  also read `.qoder/projects`, keeps its own file-side names and clears the
-  archived title when empty. For the two database-bound roots, names rank: an AgentsView
-  display name, a non-blank app database title, then the file-side name selected
-  by the parser, with the sidecar title ahead of an in-chat rename. Renames
-  appear at the next sync pass: a watched change in any agent root, manual
-  sync, or startup. Without a database file, the required table or columns, or
-  a row for the session, non-empty file-side names update normally; an empty
-  parsed name preserves the archived title. Read errors retry
-  on the next sync pass without adding a watch retry, since the store lies
-  outside watched roots. A blank row or
-  read error suppresses every file-side title signal, including an in-chat
-  rename without a sidecar. Inserts still seed from the parsed name; updates
-  keep the archived name. Antigravity instead clears the name for a blank title.
-  These rules apply to both default roots on every OS; the database is absent
-  outside macOS. `~/.qoderwork/projects` and the three
-  `SharedClientCache/cli/projects` roots keep file-side names because no title
-  store is confirmed for them.
+  root. Transcript membership is lexical under either the unresolved or
+  resolved default root. No title store is confirmed for
+  `~/.qoderwork/projects` or the three
+  `SharedClientCache/cli/projects` roots. See the
+  [usage guide](https://agentsview.io/docs/usage/#session-browser) for title
+  precedence and sync behavior.
 - **Usage and cost:** The consumed files provide transcript and model/session
   metadata but no authoritative token, cache, reasoning, credit, or USD events
   to Agentsview.

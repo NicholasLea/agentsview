@@ -101,10 +101,7 @@ The latest release is
   conversations whose transcript is gone. Names set in AgentsView still win.
 - Qoder sessions on macOS show the title the IDE saves in its application
   database, including sessions already archived. Renames appear at the next
-  sync pass: a watched change, manual sync, or startup. Names set in AgentsView
-  take precedence over non-blank database titles, then file-side names. The
-  international and CN session roots are covered; `~/.qoderwork/projects` and
-  the Qoder CLI shared-cache roots keep their file-side names.
+  sync pass.
 - Import ChatGPT dot, Codex web, and Codex cloud task chats that live only on
   OpenAI's servers. Turn it on with `[agents.codex-cloud] enabled = true` in
   `config.toml`; it uses the ChatGPT login of your local Codex homes. Live
