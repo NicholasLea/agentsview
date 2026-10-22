@@ -19,6 +19,11 @@ func TestQoderTitleAfterProjectsMoveAndSourceReload(t *testing.T) {
 	archive := dbtest.OpenTestDB(t)
 	engine := newNativeTitleEngine(t, archive, parser.AgentQoder, root)
 
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Name before moving projects")
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	assert.Equal(t, new("Name before moving projects"), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
+
 	moved := filepath.Join(filepath.Dir(root), "moved-projects")
 	require.NoError(t, os.Rename(root, moved))
 	require.NoError(t, os.Symlink(moved, root))
@@ -27,7 +32,7 @@ func TestQoderTitleAfterProjectsMoveAndSourceReload(t *testing.T) {
 	engine.ReconfigureSources(sessionsync.SourceConfig{
 		AgentDirs: map[parser.AgentType][]string{parser.AgentQoder: {resolved}},
 	})
-	transcript := testjsonl.WriteQoderTranscript(t, resolved, testjsonl.QoderTitleID, "hello")
+	transcript = testjsonl.WriteQoderTranscript(t, resolved, testjsonl.QoderTitleID, "changed transcript")
 	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Name after moving projects")
 	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
 	assert.Equal(t, new("Name after moving projects"), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
@@ -114,6 +119,12 @@ func TestQoderMissingRowFollowsSidecarUpdates(t *testing.T) {
 					want = tc.wantCustom
 				}
 				assert.Equal(t, want, nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
+			}
+			if !custom {
+				require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"\u0000\u0001\u0080"}`), 0o644))
+				transcript = testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "changed transcript")
+				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))
+				assert.Equal(t, new("Later"), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
 			}
 			stats := engine.SyncAll(t.Context(), nil)
 			assert.Zero(t, stats.Failed)

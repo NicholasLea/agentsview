@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+
+	"go.kenn.io/agentsview/internal/stringutil"
 )
 
 // QoderTitleDBName is the database where the Qoder IDE stores session titles.
@@ -93,7 +95,7 @@ func applyQoderTitles(ctx context.Context, results []ParseResult, path, fileStem
 		return
 	}
 	for i := range results {
-		results[i].Session.SessionNamePresent = results[i].Session.SessionName != ""
+		results[i].Session.SessionNamePresent = stringutil.SanitizeUTF8(results[i].Session.SessionName) != ""
 	}
 	titles, _, err := QoderStoreTitles(ctx, store)
 	title, row := "", false
