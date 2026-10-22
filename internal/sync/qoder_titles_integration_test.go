@@ -38,6 +38,25 @@ func TestQoderTitleAfterProjectsMoveAndSourceReload(t *testing.T) {
 	assert.Equal(t, new("Name after moving projects"), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
 }
 
+// TestQoderDatabaseRenameReachesUnchangedTranscript covers a session imported
+// before the IDE titled it, then renamed only in the app database. The
+// transcript never changes, so only the full-sync title pass can update it.
+func TestQoderDatabaseRenameReachesUnchangedTranscript(t *testing.T) {
+	root, store := testjsonl.QoderTitleRoot(t)
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+	archive := dbtest.OpenTestDB(t)
+	require.NoError(t, newNativeTitleEngine(t, archive, parser.AgentQoder, root).SyncPathsContext(t.Context(), []string{transcript}))
+	require.Nil(t, nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
+
+	for _, title := range []string{"Saved while closed", "Renamed in the IDE"} {
+		testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, title)
+		stats := newNativeTitleEngine(t, archive, parser.AgentQoder, root).SyncAll(t.Context(), nil)
+		assert.Zero(t, stats.Failed)
+		assert.Equal(t, 1, stats.TitlesUpdated)
+		assert.Equal(t, new(title), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
+	}
+}
+
 func TestQoderTitleFallbackOnReparse(t *testing.T) {
 	root, store := testjsonl.QoderTitleRoot(t)
 	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
