@@ -7,24 +7,16 @@ import (
 )
 
 // SanitizeUTF8 strips NUL bytes, replaces invalid UTF-8 sequences,
-// and removes control runes (other than \n, \t, \r). PostgreSQL
-// enforces strict UTF-8 and rejects NUL in text columns, so the push
-// boundary applies this to every parser-derived string; the local
-// fingerprint builders below apply it too so local fingerprints stay
-// comparable to PG-readback fingerprints when a stored row carries
-// NUL bytes.
+// and removes control runes (other than \n, \t, \r).
 //
 // The control-rune strip runs per rune, not per byte: C1 controls
 // (U+0080..U+009F) are valid two-byte UTF-8 and survive
 // strings.ToValidUTF8, so a terminal escape such as ESC ]0;...BEL
-// embedded in parsed content would otherwise persist intact. This
-// function is the single sanitization seam shared by the write path
-// (sync.validateAndSanitize), the local fingerprint builders, and the
-// PG push/readback path, so it MUST stay idempotent:
-// SanitizeUTF8(SanitizeUTF8(s)) == SanitizeUTF8(s). The byte-level
-// NUL strip is retained because it is the pg-push breaker fix and a
-// raw NUL must be removed before strings.ToValidUTF8 (which treats it
-// as valid).
+// would otherwise persist intact. A raw NUL must be removed before
+// strings.ToValidUTF8, which treats it as valid. Callers compare
+// sanitized values across the write path and PostgreSQL readback, so
+// this MUST stay idempotent: SanitizeUTF8(SanitizeUTF8(s)) ==
+// SanitizeUTF8(s).
 func SanitizeUTF8(s string) string {
 	if isCleanText(s) {
 		return s
