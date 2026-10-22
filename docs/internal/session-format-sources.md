@@ -4138,7 +4138,7 @@ schemas keep their existing ordering behavior.
   `<session-id>.jsonl`. This is a user-reported local observation, not
   producer-side evidence, and does not establish storage behavior for all
   Qoder CN releases or platforms.
-- **Title evidence (2026-10-20):** Both macOS builds keep session titles in a
+- **Title evidence:** Both macOS builds keep session titles in a
   `chat_sessions` table inside the app's Electron user-data database:
   `~/Library/Application Support/com.qoder.app.stable/main.sqlite` titles
   `~/.qoder/projects`, and `…com.qodercn.app.stable/main.sqlite` titles
@@ -4149,10 +4149,9 @@ schemas keep their existing ordering behavior.
   other live app database. The installed-app schema and paths above are
   single-machine user-side observations, not producer-side evidence, and do
   not establish behavior for other Qoder releases or platforms. A root is bound
-  to its database only by a canonical absolute home-anchored path. Root binding was
-  reverified on 2026-10-21 against configuration's `ResolveProviderRoot` path:
-  default-root symlinks resolve before title lookup, which uses the configured
-  canonical root directly. Transcript membership is
+  to its database only by a canonical absolute home-anchored path. Each title
+  lookup resolves the default-root symlinks to match the configured canonical
+  root. Transcript membership is
   lexical under either the unresolved or resolved default root. A custom root,
   or a remote mirror unpacked under a temp directory whose trailing segments
   also read `.qoder/projects`, keeps its own file-side names and clears the

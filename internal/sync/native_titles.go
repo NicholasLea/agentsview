@@ -30,10 +30,24 @@ type nativeTitleSource struct {
 }
 
 var nativeTitleSources = []nativeTitleSource{
-	{parser.AgentAntigravity, func(root string) (string, bool) {
-		return filepath.Join(root, parser.AntigravitySummariesDBName), true
-	}, parser.AntigravityStoreTitles, parser.AntigravitySessionRoot, true, false},
-	{parser.AgentQoder, parser.QoderTitleDatabase, parser.QoderStoreTitles, parser.QoderSessionRoot, false, true},
+	{
+		agent: parser.AgentAntigravity,
+		storePath: func(root string) (string, bool) {
+			return filepath.Join(root, parser.AntigravitySummariesDBName), true
+		},
+		read:                parser.AntigravityStoreTitles,
+		sessionRoot:         parser.AntigravitySessionRoot,
+		blankClears:         true,
+		outsideWatchedRoots: false,
+	},
+	{
+		agent:               parser.AgentQoder,
+		storePath:           parser.QoderTitleDatabase,
+		read:                parser.QoderStoreTitles,
+		sessionRoot:         parser.QoderSessionRoot,
+		blankClears:         false,
+		outsideWatchedRoots: true,
+	},
 }
 
 // Reconcile after parsing so an older parsed title cannot win.

@@ -11,8 +11,31 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/agentsview/internal/dbtest"
 	"go.kenn.io/agentsview/internal/parser"
+	sessionsync "go.kenn.io/agentsview/internal/sync"
 	"go.kenn.io/agentsview/internal/testjsonl"
 )
+
+func TestQoderTitleAfterProjectsMoveAndSourceReload(t *testing.T) {
+	root, store := testjsonl.QoderTitleRoot(t)
+	archive := dbtest.OpenTestDB(t)
+	engine := newNativeTitleEngine(t, archive, parser.AgentQoder, root)
+	boundStore, ok := parser.QoderTitleDatabase(root)
+	require.True(t, ok)
+	require.Equal(t, store, boundStore)
+
+	moved := filepath.Join(filepath.Dir(root), "moved-projects")
+	require.NoError(t, os.Rename(root, moved))
+	require.NoError(t, os.Symlink(moved, root))
+	resolved, _, err := parser.ResolveProviderRoot(parser.AgentQoder, root)
+	require.NoError(t, err)
+	engine.ReconfigureSources(sessionsync.SourceConfig{
+		AgentDirs: map[parser.AgentType][]string{parser.AgentQoder: {resolved}},
+	})
+	transcript := testjsonl.WriteQoderTranscript(t, resolved, testjsonl.QoderTitleID, "hello")
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Name after moving projects")
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	assert.Equal(t, new("Name after moving projects"), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
+}
 
 func TestQoderTitleFallbackOnReparse(t *testing.T) {
 	for _, tc := range []struct {
