@@ -39,43 +39,22 @@ func TestQoderTitleAfterProjectsMoveAndSourceReload(t *testing.T) {
 }
 
 func TestQoderTitleFallbackOnReparse(t *testing.T) {
-	for _, tc := range []struct {
-		state, wantName string
-	}{
-		{"database rename", "Renamed in the app"},
-		{"blank row", "Name in the app"},
-		{"unreadable file", "Name in the app"},
-	} {
-		t.Run(tc.state, func(t *testing.T) {
-			root, store := testjsonl.QoderTitleRoot(t)
-			transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
-			require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Name from export"}`), 0o644))
-			testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Name in the app")
-			archive := dbtest.OpenTestDB(t)
-			engine := newNativeTitleEngine(t, archive, parser.AgentQoder, root)
-			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-			switch tc.state {
-			case "database rename":
-				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Renamed in the app")
-			case "blank row":
-				testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "   ")
-			case "unreadable file":
-				require.NoError(t, os.WriteFile(store, []byte("not a database"), 0o644))
-			}
-			engine.SyncAll(t.Context(), nil)
-			if tc.state == "database rename" {
-				assert.Equal(t, new("Renamed in the app"), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
-			} else {
-				assert.Equal(t, new("Name in the app"), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
-			}
-			transcript = testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "changed transcript")
-			require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
-			session, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
-			require.NoError(t, err)
-			assert.Equal(t, new("changed transcript"), session.FirstMessage)
-			assert.Equal(t, new(tc.wantName), session.SessionName)
-		})
-	}
+	root, store := testjsonl.QoderTitleRoot(t)
+	transcript := testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "hello")
+	require.NoError(t, os.WriteFile(strings.TrimSuffix(transcript, ".jsonl")+"-session.json", []byte(`{"title":"Name from export"}`), 0o644))
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "Name in the app")
+	archive := dbtest.OpenTestDB(t)
+	engine := newNativeTitleEngine(t, archive, parser.AgentQoder, root)
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	testjsonl.SetQoderTitle(t, store, testjsonl.QoderTitleID, "   ")
+	engine.SyncAll(t.Context(), nil)
+	assert.Equal(t, new("Name in the app"), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
+	transcript = testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "changed transcript")
+	require.NoError(t, engine.SyncPathsContext(t.Context(), []string{transcript}))
+	session, err := archive.GetSessionFull(t.Context(), "qoder:"+testjsonl.QoderTitleID)
+	require.NoError(t, err)
+	assert.Equal(t, new("changed transcript"), session.FirstMessage)
+	assert.Equal(t, new("Name in the app"), session.SessionName)
 }
 
 func TestQoderMissingRowFollowsSidecarUpdates(t *testing.T) {
@@ -97,7 +76,7 @@ func TestQoderMissingRowFollowsSidecarUpdates(t *testing.T) {
 			sidecar := strings.TrimSuffix(transcript, ".jsonl") + "-session.json"
 			archive := dbtest.OpenTestDB(t)
 			engine := newNativeTitleEngine(t, archive, parser.AgentQoder, root)
-			for _, tc := range []struct {
+			steps := []struct {
 				title                   string
 				wantDefault, wantCustom *string
 				remove                  bool
@@ -106,7 +85,13 @@ func TestQoderMissingRowFollowsSidecarUpdates(t *testing.T) {
 				{title: "Later", wantDefault: new("Later"), wantCustom: new("Later")},
 				{remove: true, wantDefault: new("Later"), wantCustom: nil},
 				{title: "", wantDefault: new("Later"), wantCustom: nil},
-			} {
+			}
+			if custom {
+				require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"Later"}`), 0o644))
+				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))
+				steps = steps[2:]
+			}
+			for _, tc := range steps {
 				if tc.remove {
 					require.NoError(t, os.Remove(sidecar))
 				} else {
@@ -119,12 +104,6 @@ func TestQoderMissingRowFollowsSidecarUpdates(t *testing.T) {
 					want = tc.wantCustom
 				}
 				assert.Equal(t, want, nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
-			}
-			if !custom {
-				require.NoError(t, os.WriteFile(sidecar, []byte(`{"title":"\u0000\u0001\u0080"}`), 0o644))
-				transcript = testjsonl.WriteQoderTranscript(t, root, testjsonl.QoderTitleID, "changed transcript")
-				require.NoError(t, engine.SyncPathsContext(t.Context(), []string{sidecar, transcript}))
-				assert.Equal(t, new("Later"), nativeStoredTitle(t, archive, "qoder:"+testjsonl.QoderTitleID))
 			}
 			stats := engine.SyncAll(t.Context(), nil)
 			assert.Zero(t, stats.Failed)

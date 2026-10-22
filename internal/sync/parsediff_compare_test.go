@@ -116,7 +116,7 @@ func TestCompareSessionFields(t *testing.T) {
 			},
 		},
 		{
-			name: "qoder blank app title preserves archived name over sidecar",
+			name: "preserved session name ignores parsed name drift",
 			stored: func(s *db.Session) {
 				s.Agent = "qoder"
 				s.SessionName = new("Name in the app")

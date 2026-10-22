@@ -98,6 +98,7 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		database    bool
 		row         string
 		sidecar     bool
+		controls    bool
 		rename      bool
 		wantName    string
 		wantPresent bool
@@ -109,6 +110,7 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 		{name: "missing database no title"},
 		{name: "custom root no title clears name", custom: true, wantPresent: true},
 		{name: "no row sidecar", database: true, sidecar: true, wantName: "From sidecar", wantPresent: true},
+		{name: "no row sidecar only controls", database: true, sidecar: true, controls: true, wantName: "\x00\x01\u0080"},
 		{name: "blank row sidecar", database: true, row: "   ", sidecar: true, wantName: "From sidecar"},
 		{name: "read error sidecar", database: true, sidecar: true, wantName: "From sidecar", corrupt: true},
 	} {
@@ -134,7 +136,11 @@ func TestQoderParseTitlePrecedence(t *testing.T) {
 				require.NoError(t, os.WriteFile(path, append(body, []byte(rename)...), 0o644))
 			}
 			if tc.sidecar {
-				require.NoError(t, os.WriteFile(strings.TrimSuffix(path, ".jsonl")+"-session.json", []byte(`{"title":"From sidecar"}`), 0o644))
+				body := `{"title":"From sidecar"}`
+				if tc.controls {
+					body = `{"title":"\u0000\u0001\u0080"}`
+				}
+				require.NoError(t, os.WriteFile(strings.TrimSuffix(path, ".jsonl")+"-session.json", []byte(body), 0o644))
 			}
 			results, err := ParseQoderSession(path, "sample-project", "local")
 			require.NoError(t, err)

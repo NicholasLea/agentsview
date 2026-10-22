@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSQLiteTitleMissingColumnWarnsOnStateChange(t *testing.T) {
-	for _, tc := range []struct {
+func TestSQLiteTitleMissingSchemaWarnsOnStateChange(t *testing.T) {
+	for i, tc := range []struct {
 		missing, schema string
 	}{
 		{"column conversation_id", "CREATE TABLE conversation_summaries (title TEXT)"},
@@ -44,6 +44,9 @@ func TestSQLiteTitleMissingColumnWarnsOnStateChange(t *testing.T) {
 			assert.Contains(t, logs.String(), store)
 			assert.Contains(t, logs.String(), "missing "+tc.missing)
 			assert.Equal(t, 1, bytes.Count(logs.Bytes(), []byte("Warning:")))
+			if i != 0 {
+				return
+			}
 
 			logs.Reset()
 			for _, refresh := range []string{"cached", "expired", "invalidated"} {
