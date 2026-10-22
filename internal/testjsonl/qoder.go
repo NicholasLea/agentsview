@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -20,14 +21,37 @@ const QoderProjectDir = "-Users-alice-sample-project"
 // session root and its application database path.
 func QoderTitleRoot(t *testing.T) (root, store string) {
 	t.Helper()
+	home := IsolateQoderHome(t)
+	root = filepath.Join(home, ".qoder", "projects")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	store = filepath.Join(QoderAppDataDir(home), "com.qoder.app.stable", "main.sqlite")
+	return root, store
+}
+
+// IsolateQoderHome points the home and per-user config directories at a fresh
+// temporary home and returns it with symlinks resolved.
+func IsolateQoderHome(t *testing.T) string {
+	t.Helper()
 	home, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	root = filepath.Join(home, ".qoder", "projects")
-	require.NoError(t, os.MkdirAll(root, 0o755))
-	store = filepath.Join(home, "Library", "Application Support", "com.qoder.app.stable", "main.sqlite")
-	return root, store
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	return home
+}
+
+// QoderAppDataDir is the Electron appData directory under an isolated home,
+// where each Qoder build keeps its data directory.
+func QoderAppDataDir(home string) string {
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support")
+	case "windows":
+		return filepath.Join(home, "AppData", "Roaming")
+	default:
+		return filepath.Join(home, ".config")
+	}
 }
 
 // QoderTitleSchema is the smallest chat_sessions shape the title reader needs.

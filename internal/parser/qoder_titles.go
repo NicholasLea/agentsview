@@ -8,14 +8,15 @@ import (
 	"go.kenn.io/agentsview/internal/stringutil"
 )
 
-// QoderTitleDBName is the database where the Qoder IDE stores session titles.
+// QoderTitleDBName is the database where the Qoder app stores session titles.
 // It lives in the app's Electron user-data directory, outside every session
 // root, so a root is bound to it only by an absolute home-anchored path.
 const QoderTitleDBName = "main.sqlite"
 
-// qoderTitleLayouts pairs each macOS session root with the app that owns it.
+// qoderTitleLayouts pairs each home session root with the app that owns it.
 // The two builds keep separate databases, and one build's session ID is looked
-// up only under its own root.
+// up only under its own root. appID is the build's data directory name under
+// Electron's appData directory, which os.UserConfigDir matches on every OS.
 var qoderTitleLayouts = []struct {
 	dotDir string
 	appID  string
@@ -51,7 +52,7 @@ func qoderSessionTitleStore(path string) (root, store string, ok bool) {
 }
 
 // QoderTitleDatabase returns the application database holding titles for a
-// configured session root. Only the two macOS default roots have a known
+// configured session root. Only the two home default roots have a known
 // title store: a custom root, a Qoder CLI or .qoderwork root, and a remote
 // mirror root extracted under a temp directory all return false. Matching a
 // trailing path segment would bind the local database to another machine's
@@ -71,6 +72,10 @@ func qoderTitleDatabases() map[string]qoderTitleStore {
 	if err != nil || home == "" {
 		return nil
 	}
+	appData, err := os.UserConfigDir()
+	if err != nil {
+		return nil
+	}
 	stores := make(map[string]qoderTitleStore, 2*len(qoderTitleLayouts))
 	for _, layout := range qoderTitleLayouts {
 		unresolved := filepath.Join(home, layout.dotDir, "projects")
@@ -78,7 +83,7 @@ func qoderTitleDatabases() map[string]qoderTitleStore {
 		if err != nil {
 			continue
 		}
-		location := qoderTitleStore{root: root, store: filepath.Join(home, "Library", "Application Support", layout.appID, QoderTitleDBName)}
+		location := qoderTitleStore{root: root, store: filepath.Join(appData, layout.appID, QoderTitleDBName)}
 		stores[unresolved] = location
 		stores[root] = location
 	}

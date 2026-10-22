@@ -12,9 +12,8 @@ import (
 )
 
 func TestQoderTitleDatabase(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	home := testjsonl.IsolateQoderHome(t)
+	appData := testjsonl.QoderAppDataDir(home)
 	for _, tc := range []struct {
 		name string
 		root string
@@ -23,14 +22,12 @@ func TestQoderTitleDatabase(t *testing.T) {
 		{
 			name: "international",
 			root: filepath.Join(home, ".qoder", "projects"),
-			want: filepath.Join(home, "Library", "Application Support",
-				"com.qoder.app.stable", QoderTitleDBName),
+			want: filepath.Join(appData, "com.qoder.app.stable", QoderTitleDBName),
 		},
 		{
 			name: "cn",
 			root: filepath.Join(home, ".qoder-cn", "projects"),
-			want: filepath.Join(home, "Library", "Application Support",
-				"com.qodercn.app.stable", QoderTitleDBName),
+			want: filepath.Join(appData, "com.qodercn.app.stable", QoderTitleDBName),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,11 +56,7 @@ func TestQoderTitleDatabase(t *testing.T) {
 }
 
 func TestQoderSessionRoot(t *testing.T) {
-	home := t.TempDir()
-	home, err := filepath.EvalSymlinks(home)
-	require.NoError(t, err)
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	home := testjsonl.IsolateQoderHome(t)
 	outer := filepath.Join(home, ".qoder", "projects")
 	inner := filepath.Join(home, ".qoder-cn", "projects")
 	transcript := filepath.Join(inner, "-Users-u-demo", "aaaa.jsonl")
