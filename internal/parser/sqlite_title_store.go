@@ -102,14 +102,10 @@ func readSQLiteTitles(
 		EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name = 'title')`, table, table, idColumn, table).Scan(&exists, &hasID, &hasTitle); err != nil {
 		return nil, err
 	}
-	if exists && (!hasID || !hasTitle) && stateChanged {
-		column := idColumn
-		if hasID {
-			column = "title"
+	if missing := missingTitleSchema(table, idColumn, exists, hasID, hasTitle); missing != "" {
+		if stateChanged {
+			log.Printf("Warning: title database %s is missing %s", path, missing)
 		}
-		log.Printf("Warning: title database %s is missing column %s", path, column)
-	}
-	if !exists || !hasID || !hasTitle {
 		return nil, nil
 	}
 	rows, err := db.QueryContext(ctx, query)
@@ -133,4 +129,17 @@ func readSQLiteTitles(
 		return nil, err
 	}
 	return titles, nil
+}
+
+// missingTitleSchema names the first absent part of a title schema, or "".
+func missingTitleSchema(table, idColumn string, exists, hasID, hasTitle bool) string {
+	switch {
+	case !exists:
+		return "table " + table
+	case !hasID:
+		return "column " + idColumn
+	case !hasTitle:
+		return "column title"
+	}
+	return ""
 }
